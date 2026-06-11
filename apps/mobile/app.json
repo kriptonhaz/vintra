@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "Vintra",
+    "slug": "vintra-mobile",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "vintra",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.vintra.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Vintra butuh lokasi untuk verifikasi check-in absensi di cabang kamu.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Vintra butuh lokasi untuk pengingat check-out ketika kamu meninggalkan cabang.",
+        "NSCameraUsageDescription": "Vintra butuh akses kamera untuk foto selfie absensi.",
+        "NSPhotoLibraryUsageDescription": "Vintra butuh akses galeri untuk pilih foto produk atau orang."
+      }
+    },
+    "android": {
+      "package": "com.vintra.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Vintra butuh lokasi untuk verifikasi check-in absensi."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Vintra butuh akses kamera untuk foto selfie absensi."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      }
+    }
+  }
+}

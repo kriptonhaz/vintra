@@ -1,0 +1,40 @@
+name: Mobile typecheck
+
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/shared/**'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/mobile-typecheck.yml'
+  push:
+    branches: [staging, main]
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/shared/**'
+
+# Cancel an in-flight run when a newer commit lands on the same PR / branch
+concurrency:
+  group: mobile-typecheck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: tsc --noEmit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck mobile
+        working-directory: apps/mobile
+        run: bun run typecheck

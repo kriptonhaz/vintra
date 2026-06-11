@@ -1,0 +1,27 @@
+{
+  "name": "@vintra/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "generate": "dotenv -e ../../apps/web/.env -- drizzle-kit generate",
+    "migrate": "dotenv -e ../../apps/web/.env -- tsx src/migrate.ts",
+    "studio": "dotenv -e ../../apps/web/.env -- drizzle-kit studio",
+    "seed": "dotenv -e ../../apps/web/.env -- tsx src/seed.ts",
+    "seed:rbac": "dotenv -e ../../apps/web/.env -- tsx src/seed-rbac.ts",
+    "migrate:baseline": "dotenv -e ../../apps/web/.env -- tsx src/migrate-baseline.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.1",
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.9",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}

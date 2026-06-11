@@ -1,0 +1,38 @@
+{
+  "name": "vintra",
+  "version": "0.1.0",
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.5.2",
+    "@changesets/cli": "^2.29.8",
+    "dotenv-cli": "^11.0.0"
+  },
+  "dependencies": {
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "private": true,
+  "scripts": {
+    "dev": "bun run --filter @vintra/web dev",
+    "build": "bun run --filter @vintra/web build",
+    "typecheck": "bun run --filter @vintra/web typecheck",
+    "typecheck:mobile": "bun run --filter @vintra/mobile typecheck",
+    "typecheck:all": "bun run --filter @vintra/web typecheck && bun run --filter @vintra/mobile typecheck",
+    "db:generate": "bun run --filter @vintra/db generate",
+    "db:migrate": "bun run --filter @vintra/db migrate",
+    "db:migrate:baseline": "bun run --filter @vintra/db migrate:baseline",
+    "db:studio": "bun run --filter @vintra/db studio",
+    "changeset": "bunx changeset",
+    "changeset:version": "bunx changeset version",
+    "changeset:tag": "bunx changeset tag",
+    "release": "bun run build && bunx changeset publish"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tooling/*"
+  ],
+  "overrides": {
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  }
+}

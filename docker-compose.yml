@@ -1,0 +1,40 @@
+# Local dev stack for Vintra.
+#
+# Postgres is intentionally NOT included — we use the existing Supabase
+# project (DATABASE_URL in apps/web/.env points at the pooler). That
+# saves ~300 MB on the 4 GB ThinkPad and removes a class of "schema
+# drift between dev and prod" bugs.
+#
+# Redis is required for:
+#   - BullMQ queues (apps/api once it's wired up in JUR-21)
+#   - Baileys auth state persistence (JUR-26 onwards)
+#   - small per-instance caches and rate limiters
+#
+# `noeviction` is deliberate — if Redis evicts during a session-resume
+# burst, Baileys credentials silently disappear and every tenant has
+# to re-scan their QR. We'd rather BullMQ enqueue fail loudly than
+# evict session data.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: vintra-redis
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "noeviction"
+    ports:
+      # Host port 6380 — 6379 is often taken by another local redis
+      # instance, and sharing one would mix the two
+      # apps' asynq queues. Match REDIS_URL in apps/api/.env.
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+volumes:
+  redis-data:

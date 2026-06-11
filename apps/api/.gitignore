@@ -1,0 +1,19 @@
+# air hot-reload build output
+tmp/
+build-errors.log
+
+# Production build artifacts
+bin/
+# Local `go build .` output — Go names it after the module dir (`api`).
+/api
+
+# SQLite store for whatsmeow sessions (JUR-64) + any other local DBs.
+# Never commit — recreated on first connect.
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Local env file (real secrets — only .env.example is committed)
+.env

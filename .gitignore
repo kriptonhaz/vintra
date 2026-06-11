@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+.bun/
+
+# Build output
+dist/
+.output/
+.vinxi/
+.netlify/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# SSH keys / secrets — never commit
+*.pem
+*.key
+vintra-prod.txt
+
+# IDE
+.vscode/
+.idea/
+.gemini/
+*.swp
+*.swo
+.DS_Store
+
+# Drizzle
+drizzle/meta/
+
+# TanStack Router (auto-generated)
+routeTree.gen.ts
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+
+# OS
+Thumbs.db
+
+# Local QA screenshots from chrome-devtools MCP runs
+.qa-screenshots/
+
+# Local AI tool config — holds personal MCP access tokens, never commit
+opencode.json
+origin-cert-cloudflare.txt
+private-key-cloudflare.txt
+client_secret_*.json

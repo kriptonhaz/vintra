@@ -1,0 +1,29 @@
+# sqlc generates type-safe Go code from SQL.
+#
+# Schema source: the Drizzle migrations under packages/db. sqlc applies
+# them in order to build a virtual schema, then types every query
+# against it. When the Drizzle schema changes, regenerate:
+#
+#   cd apps/api && sqlc generate
+#
+# Install sqlc:
+#   go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+#
+# Queries: hand-written .sql files under internal/db/queries/. Each
+# file becomes a Go method on the generated Queries struct. We add
+# them feature-by-feature in JUR-63 (wa_instances) and onwards.
+
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "../../packages/db/src/migrations"
+    queries: "internal/db/queries"
+    gen:
+      go:
+        package: "queries"
+        out: "internal/db/queries/generated"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        json_tags_case_style: "camel"
+        emit_prepared_queries: false   # transaction-mode pooler can't cache them
+        emit_interface: true            # generates Querier interface — easier to mock in tests

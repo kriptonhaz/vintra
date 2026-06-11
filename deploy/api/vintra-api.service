@@ -1,0 +1,79 @@
+# Vintra WhatsApp API — Go binary managed by systemd.
+#
+# Install (one-time per fresh server, see JUR-58 checklist):
+#   sudo cp deploy/api/vintra-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vintra-api
+#
+# The `deploy.sh api` script calls `sudo systemctl restart vintra-api`
+# at the end of each deploy — that requires a NOPASSWD rule for the
+# `ubuntu` user. Add `/etc/sudoers.d/vintra-api`:
+#
+#   ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart vintra-api, \
+#                              /bin/systemctl status vintra-api, \
+#                              /bin/systemctl is-active vintra-api
+#
+# Logs:
+#   sudo journalctl -u vintra-api -f         # follow live
+#   sudo journalctl -u vintra-api -n 200     # last 200 lines
+
+[Unit]
+Description=Vintra WhatsApp API (Fiber + whatsmeow)
+Documentation=https://github.com/kriptonhaz/vintra
+# Start after the network is reachable AND redis-server is up. The api
+# fails fast on missing redis (asynq client init), so ordering matters
+# during reboot.
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+
+# Working dir is where data/ (whatsmeow SQLite session files) lives.
+# The binary references "data/" as a RELATIVE path, so this matters.
+WorkingDirectory=/home/ubuntu/prod/vintra-api
+ExecStart=/home/ubuntu/prod/vintra-api/bin/api
+
+# All secrets live in /home/ubuntu/prod/vintra-api/.env — NOT
+# committed. Fields documented in apps/api/.env.example.
+EnvironmentFile=/home/ubuntu/prod/vintra-api/.env
+
+# Restart on crash but back off so a panic loop doesn't burn CPU. After
+# 5 failures in 60s, give up — wait for human intervention via
+# systemctl reset-failed.
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=5
+
+# Memory cap — the api should sit well below this in steady state
+# (~50-100 MB per ~30 paired instances). systemd kills + restarts if
+# we breach, providing a poor-man's OOM canary. Keep generous headroom
+# vs MemoryHigh to avoid throttling under bursty whatsmeow event load.
+MemoryMax=900M
+MemoryHigh=700M
+
+# Stdout/stderr go to journald. The Go binary uses slog with JSON
+# output in prod (default for NodeEnv=production), so `journalctl -o
+# json-pretty` is the nicest way to grep structured fields.
+StandardOutput=journal
+StandardError=journal
+
+# Filesystem hardening. The api needs write access to data/ (whatsmeow
+# session DBs) but nothing else. ProtectSystem=strict mounts the root
+# FS read-only; ReadWritePaths re-grants write to just the data dir.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/prod/vintra-api/data
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+# Graceful shutdown — the api drains asynq tasks + closes whatsmeow
+# sockets on SIGTERM. Give it 20s before SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target

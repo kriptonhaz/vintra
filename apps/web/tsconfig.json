@@ -1,0 +1,15 @@
+{
+  "extends": "../../tooling/typescript/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+      "@vintra/db": ["../../packages/db/src"],
+      "@vintra/db/*": ["../../packages/db/src/*"],
+      "@vintra/shared": ["../../packages/shared/src"],
+      "@vintra/shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": ["src/**/*", "vite.config.ts"],
+  // Test files run under `bun test` (bun:test types); exclude from tsc.
+  "exclude": ["src/**/*.test.ts"]
+}

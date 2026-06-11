@@ -1,0 +1,7 @@
+# Force a single hoisted node_modules so there's exactly one copy of vite.
+# Bun's default isolated linker installs per-peer-context duplicates of vite,
+# and the TanStack Start plugin + the vite CLI then load DIFFERENT vite
+# instances — the dev SSR middleware never mounts and every route 404s
+# ("Cannot GET /"). Hoisted dedupes vite to one instance and fixes dev.
+[install]
+linker = "hoisted"

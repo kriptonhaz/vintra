@@ -1,0 +1,32 @@
+-- Make race-condition duplicate tenants physically impossible.
+--
+-- ─── Why ─────────────────────────────────────────────────────────────
+--
+-- Two production owners ended up with 3 tenants each due to a race
+-- in registerWithEmail / ensureTenantForOAuth — both used a
+-- SELECT-then-INSERT pattern with no DB-level uniqueness guard, so
+-- two concurrent signups for the same email created two (or three)
+-- tenant rows milliseconds apart. The downstream effect was that
+-- requireAuth's `limit(1)` membership pick (no ORDER BY at the time)
+-- non-deterministically routed the user to whichever tenant the
+-- physical scan hit first — so a customer who upgraded one of their
+-- duplicates to Komplit would sometimes land on the free duplicate
+-- and not see their paid modules.
+--
+-- Data was cleaned up manually before this migration (move real data
+-- to the surviving tenant, drop empty duplicates), so the UNIQUE
+-- constraint applies cleanly on first attempt.
+--
+-- ─── Model assumption ────────────────────────────────────────────────
+--
+-- Today: one-tenant-per-owner. If a user wants a second business
+-- they need a second account.
+--
+-- Future: support multiple tenants per user via a session-level
+-- tenant picker. That's the JUR ticket filed alongside this fix —
+-- when that work lands, this constraint gets dropped and replaced
+-- with a session/cookie-driven `current_tenant_id` mechanism in
+-- requireAuth.
+
+ALTER TABLE "tenants"
+  ADD CONSTRAINT "tenants_owner_id_key" UNIQUE ("owner_id");

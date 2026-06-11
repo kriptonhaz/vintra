@@ -1,0 +1,417 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* ── Vintra "Midnight Sapphire & Champagne" palette ──────────────
+   * brand   — deep sapphire, the single workhorse hue
+   * primary — same sapphire family, one step inkier (unified with brand)
+   * accent  — champagne gold / warm brass, used sparingly
+   * gray    — custom cool-slate neutrals; dark base is rich ink #0b0f1a
+   * success/warning/danger — desaturated to sit inside the premium palette
+   */
+
+  --color-primary-50: #eef2fb;
+  --color-primary-100: #dce5f8;
+  --color-primary-200: #bccbf1;
+  --color-primary-300: #8fa8e6;
+  --color-primary-400: #5f80d6;
+  --color-primary-500: #3a5ec2;
+  --color-primary-600: #2547a4;
+  --color-primary-700: #1e3a85;
+  --color-primary-800: #1b306a;
+  --color-primary-900: #182a55;
+  --color-primary-950: #111b38;
+
+  --color-accent-50: #fbf8f0;
+  --color-accent-100: #f6efdc;
+  --color-accent-200: #ecddb8;
+  --color-accent-300: #dfc78c;
+  --color-accent-400: #d4b468;
+  --color-accent-500: #c9a24b;
+  --color-accent-600: #b4863a;
+  --color-accent-700: #96692e;
+  --color-accent-800: #7a5328;
+  --color-accent-900: #654424;
+  --color-accent-950: #3a2412;
+
+  --color-brand-50:  #f0f4fe;
+  --color-brand-100: #e0e9fd;
+  --color-brand-200: #c2d2fa;
+  --color-brand-300: #97b1f5;
+  --color-brand-400: #6589ee;
+  --color-brand-500: #3d69e4;
+  --color-brand-600: #2152d4;
+  --color-brand-700: #1a3fa8;
+  --color-brand-800: #18347f;
+  --color-brand-900: #162c63;
+  --color-brand-950: #101d40;
+
+  /* Cool-slate neutrals. Overrides Tailwind's default gray so every
+     existing gray-* class picks up the architectural slate cast.
+     950 is the dark-mode base surface; 900 the elevated panel. */
+  --color-gray-50: #f7f8fa;
+  --color-gray-100: #eff1f5;
+  --color-gray-200: #e2e5ec;
+  --color-gray-300: #cbd1dc;
+  --color-gray-400: #99a2b3;
+  --color-gray-500: #677084;
+  --color-gray-600: #4a5266;
+  --color-gray-700: #3a4152;
+  --color-gray-800: #232938;
+  --color-gray-900: #161b28;
+  --color-gray-950: #0b0f1a;
+
+  --color-success-50: #f2faf5;
+  --color-success-100: #e0f4e8;
+  --color-success-200: #c2e8d1;
+  --color-success-300: #93d4ae;
+  --color-success-400: #5fb988;
+  --color-success-500: #399d68;
+  --color-success-600: #2a7f53;
+  --color-success-700: #246545;
+  --color-success-800: #205139;
+  --color-success-900: #1b4330;
+  --color-success-950: #0d2519;
+
+  --color-warning-50: #fdf8ed;
+  --color-warning-100: #faedd0;
+  --color-warning-200: #f4d99f;
+  --color-warning-300: #ecbf67;
+  --color-warning-400: #e3a53d;
+  --color-warning-500: #d4881f;
+  --color-warning-600: #b96a16;
+  --color-warning-700: #964f16;
+  --color-warning-800: #7a3f19;
+  --color-warning-900: #653418;
+  --color-warning-950: #3a1a0a;
+
+  --color-danger-50: #fcf3f2;
+  --color-danger-100: #f9e2e0;
+  --color-danger-200: #f4c8c5;
+  --color-danger-300: #eaa09b;
+  --color-danger-400: #dd6f69;
+  --color-danger-500: #c94840;
+  --color-danger-600: #b03330;
+  --color-danger-700: #93282a;
+  --color-danger-800: #7a2427;
+  --color-danger-900: #672225;
+  --color-danger-950: #380e10;
+
+  /* Raw red and yellow utility classes are used widely for destructive
+     and caution states. Re-point the default Tailwind ramps at the same
+     desaturated values as danger/warning so they stay harmonious
+     without touching every call site. */
+  --color-red-50: #fcf3f2;
+  --color-red-100: #f9e2e0;
+  --color-red-200: #f4c8c5;
+  --color-red-300: #eaa09b;
+  --color-red-400: #dd6f69;
+  --color-red-500: #c94840;
+  --color-red-600: #b03330;
+  --color-red-700: #93282a;
+  --color-red-800: #7a2427;
+  --color-red-900: #672225;
+  --color-red-950: #380e10;
+
+  --color-yellow-50: #fdf8ed;
+  --color-yellow-100: #faedd0;
+  --color-yellow-200: #f4d99f;
+  --color-yellow-300: #ecbf67;
+  --color-yellow-400: #e3a53d;
+  --color-yellow-500: #d4881f;
+  --color-yellow-600: #b96a16;
+  --color-yellow-700: #964f16;
+  --color-yellow-800: #7a3f19;
+  --color-yellow-900: #653418;
+  --color-yellow-950: #3a1a0a;
+}
+
+/* Animations */
+@keyframes sheet-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes dialog-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Mobile bottom-sheet: slides up from bottom of screen. Pairs with the
+   bottom-anchored Dialog layout for a thumb-friendly modal pattern that
+   matches what cashiers see in Tokopedia/Shopee/Qasir on Android. */
+@keyframes bottom-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@utility animate-sheet-in {
+  animation: sheet-slide-in 0.3s ease-out;
+}
+
+@utility animate-dialog-in {
+  animation: dialog-fade-in 0.2s ease-out;
+}
+
+@utility animate-bottom-sheet-in {
+  animation: bottom-sheet-up 0.25s ease-out;
+}
+
+/* Infinite horizontal marquee — landing page social-proof strip. The
+   track holds its content TWICE; translating by -50% then looping reads
+   as a seamless scroll. Pausing on hover keeps the names legible. */
+@keyframes marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@utility animate-marquee {
+  animation: marquee-scroll 36s linear infinite;
+  &:hover {
+    animation-play-state: paused;
+  }
+}
+
+/* Slow vertical float for the hero's layered widget stack. */
+@keyframes float-y {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@utility animate-float {
+  animation: float-y 7s ease-in-out infinite;
+}
+
+@utility animate-float-delayed {
+  animation: float-y 7s ease-in-out 2.2s infinite;
+}
+
+/* Hide the scrollbar visually while keeping the area scrollable. Used
+   on the sidebar nav so a long nav list still scrolls but the gutter
+   doesn't take up real estate or visually clash with the layout. */
+@utility scrollbar-none {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge / IE */
+  &::-webkit-scrollbar {
+    display: none; /* Chrome / Safari */
+  }
+}
+
+/* Base styles */
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem; /* offset for sticky navbar */
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Invert native date/time picker indicator in dark mode so it's visible on dark inputs */
+.dark input[type='time']::-webkit-calendar-picker-indicator,
+.dark input[type='date']::-webkit-calendar-picker-indicator,
+.dark input[type='datetime-local']::-webkit-calendar-picker-indicator,
+.dark input[type='month']::-webkit-calendar-picker-indicator,
+.dark input[type='week']::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(0.85);
+  cursor: pointer;
+}
+
+/* ─── iOS Safari date / time input fixes ─────────────────────────────
+ * Without these, iOS Safari renders <input type="date"> with WebKit's
+ * default styling that:
+ *   - Ignores our height/padding (intrinsic sizing wins)
+ *   - Centers the value text via ::-webkit-date-and-time-value, which
+ *     can push the displayed date out of a tight container
+ *   - Adds a thin grey background that fights our dark-mode look
+ * Targeting both the input itself and the internal pseudo-element
+ * keeps everything aligned with the rest of our form fields. */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'],
+input[type='week'] {
+  -webkit-appearance: none;
+  appearance: none;
+  /* Match the standard <Input> height (h-10 = 2.5rem) so the field
+     doesn't shrink to iOS's smaller intrinsic size. */
+  min-height: 2.5rem;
+  /* iOS centers content by default — left-align so it matches every
+     other input in the form. */
+  text-align: left;
+  /* Lets the value flow normally instead of being absolutely
+     positioned by WebKit, which is what causes the overflow. */
+  display: inline-block;
+}
+
+/* The date value WebKit injects sits inside this pseudo-element.
+   Force it to the same line-height as text so it doesn't push the
+   field height upward and doesn't truncate. */
+input[type='date']::-webkit-date-and-time-value,
+input[type='time']::-webkit-date-and-time-value,
+input[type='datetime-local']::-webkit-date-and-time-value,
+input[type='month']::-webkit-date-and-time-value,
+input[type='week']::-webkit-date-and-time-value {
+  text-align: left;
+  min-height: 1.25rem;
+  /* Let the value occupy the full available width so the calendar
+     icon stays at the right edge instead of being shoved off-screen. */
+  width: 100%;
+}
+
+/* JUR-13: Help article body styling. Scoped to .article-prose so
+   it does not leak into the rest of the app. Tuned for Indonesian
+   long-form text — slightly looser line-height than the default and
+   spacing between block elements that matches our card padding. */
+.article-prose h2 {
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-gray-900, #161b28);
+}
+.dark .article-prose h2 {
+  color: var(--color-gray-100, #eff1f5);
+}
+.article-prose p {
+  margin-bottom: 1rem;
+  line-height: 1.7;
+}
+.article-prose ul,
+.article-prose ol {
+  margin-bottom: 1rem;
+  padding-left: 1.5rem;
+  line-height: 1.7;
+}
+.article-prose ul {
+  list-style: disc;
+}
+.article-prose ol {
+  list-style: decimal;
+}
+.article-prose li {
+  margin-bottom: 0.25rem;
+}
+.article-prose code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dark .article-prose code {
+  background: rgba(255, 255, 255, 0.08);
+}
+.article-prose strong {
+  font-weight: 600;
+  color: var(--color-gray-900, #161b28);
+}
+.dark .article-prose strong {
+  color: var(--color-gray-100, #eff1f5);
+}
+.article-prose em {
+  color: var(--color-gray-600, #4a5266);
+  font-style: italic;
+}
+/* issue #206: extra elements the CMS editor can emit (the help center
+   only used h2/p/ul/ol/code). Scoped to .article-prose so the editor
+   preview and the public article page render identically. */
+.article-prose h1 {
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-gray-900, #161b28);
+}
+.article-prose h3 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-gray-900, #161b28);
+}
+.article-prose h4 {
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-gray-900, #161b28);
+}
+.dark .article-prose h1,
+.dark .article-prose h3,
+.dark .article-prose h4 {
+  color: var(--color-gray-100, #eff1f5);
+}
+.article-prose a {
+  color: var(--color-brand-700, #1a3fa8);
+  text-decoration: underline;
+}
+.dark .article-prose a {
+  color: var(--color-brand-400, #6589ee);
+}
+.article-prose img {
+  margin: 1rem 0;
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+}
+.article-prose blockquote {
+  margin: 1rem 0;
+  padding-left: 1rem;
+  border-left: 3px solid var(--color-brand-400, #6589ee);
+  color: var(--color-gray-600, #4a5266);
+  font-style: italic;
+}
+.dark .article-prose blockquote {
+  color: var(--color-gray-400, #99a2b3);
+}
+.article-prose hr {
+  margin: 1.5rem 0;
+  border: 0;
+  border-top: 1px solid var(--color-gray-200, #e2e5ec);
+}
+.dark .article-prose hr {
+  border-top-color: var(--color-gray-700, #3a4152);
+}
+.article-prose pre {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  font-size: 0.875em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dark .article-prose pre {
+  background: rgba(255, 255, 255, 0.08);
+}
+.article-prose pre code {
+  background: transparent;
+  padding: 0;
+}

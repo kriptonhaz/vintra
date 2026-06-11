@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "supabase-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--access-token",
+        "sbp_15c8474e4d39e98dba8934d417845db009df39fc",
+        "--project-ref",
+        "gqjszbqbkoxjnsbspcvt"
+      ],
+      "env": {}
+    },
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp"
+    }
+  }
+}
