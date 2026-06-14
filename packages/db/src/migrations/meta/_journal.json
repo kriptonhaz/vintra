@@ -897,6 +897,13 @@
       "when": 1786017600000,
       "tag": "0127_pos_bank_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1786104000000,
+      "tag": "0128_storefront",
+      "breakpoints": true
     }
   ]
 }

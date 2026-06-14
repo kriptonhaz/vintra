@@ -40,7 +40,7 @@ import { useToast } from '@/components/ui/toast'
 import { formatRupiah } from '@/lib/currency'
 import { ModuleBreadcrumb } from '@/components/layout/module-breadcrumb'
 import { cn, formatDate, formatNumberID } from '@/lib/utils' // JUR-137
-import { HppLinkPicker, SellableToggle, PrepModeToggle, BookingFields } from './items.index'
+import { HppLinkPicker, SellableToggle, PrepModeToggle, BookingFields, OnlineFields } from './items.index'
 import { getPrepStatus } from '@/server/functions/pos-prep'
 import { PrepBatchSheet } from '@/components/pos/prep-batch-sheet'
 
@@ -79,6 +79,10 @@ const editItemSchema = z.object({
   prepMode: z.boolean().optional(),
   /** Pin to top of POS "Semua" view. */
   isFavorite: z.boolean().optional(),
+  /** Toko Online curation. */
+  isOnline: z.boolean().optional(),
+  shippingWeightGrams: z.coerce.number().int().min(0).nullable().optional(),
+  onlineStockCap: z.coerce.number().min(0).nullable().optional(),
 })
 type EditItemForm = z.infer<typeof editItemSchema>
 
@@ -594,6 +598,9 @@ function EditItemForm({
       bookingDurationMin: item.bookingDurationMin ?? null,
       prepMode: item.prepMode ?? false,
       isFavorite: item.isFavorite ?? false,
+      isOnline: item.isOnline ?? false,
+      shippingWeightGrams: item.shippingWeightGrams ?? null,
+      onlineStockCap: item.onlineStockCap ? Number(item.onlineStockCap) : null,
     },
   })
 
@@ -681,6 +688,9 @@ function EditItemForm({
           prepMode:
             linkSource === 'product' ? values.prepMode ?? false : false,
           isFavorite: values.isFavorite ?? false,
+          isOnline: values.isOnline ?? false,
+          shippingWeightGrams: values.shippingWeightGrams ?? null,
+          onlineStockCap: values.onlineStockCap ?? null,
         },
       })
       // Only re-fire S3 work when the photo actually changed. New
@@ -884,6 +894,7 @@ function EditItemForm({
 
         <SellableToggle control={form.control} />
         <BookingFields control={form.control} />
+        <OnlineFields control={form.control} />
         {linkSource === 'product' && (
           <PrepModeToggle control={form.control} />
         )}

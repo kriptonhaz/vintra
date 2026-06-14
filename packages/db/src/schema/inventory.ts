@@ -183,6 +183,25 @@ export const inventoryItems = pgTable(
      * /inventory/items/<id> detail page.
      */
     isFavorite: boolean('is_favorite').notNull().default(false),
+    /**
+     * Toko Online curation: when true the item appears in the public
+     * storefront catalog and is buyable online. Independent from
+     * `isSellable` (POS grid) so tenants curate the online catalog
+     * separately. Default false — opt-in per item.
+     */
+    isOnline: boolean('is_online').notNull().default(false),
+    /**
+     * Per-unit shipping weight in grams, used for reference and any
+     * future weight-based ongkir. Nullable — optional for the manual
+     * per-zone shipping model.
+     */
+    shippingWeightGrams: integer('shipping_weight_grams'),
+    /**
+     * Optional cap on how much of the physical stock is exposed online
+     * (e.g. reserve some for in-store sales). Null = use full branch
+     * balance. In the item's base unit.
+     */
+    onlineStockCap: numeric('online_stock_cap', { precision: 15, scale: 4 }),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),

@@ -987,6 +987,12 @@ const itemInput = z.object({
    * page; ignored when category filter is active in the cashier.
    */
   isFavorite: z.boolean().optional(),
+  /** Toko Online: buyable on the public storefront (opt-in per item). */
+  isOnline: z.boolean().optional(),
+  /** Per-unit shipping weight in grams (manual ongkir reference). */
+  shippingWeightGrams: z.coerce.number().int().min(0).nullable().optional(),
+  /** Optional cap on stock exposed online, in base unit. */
+  onlineStockCap: z.coerce.number().min(0).nullable().optional(),
 })
 
 export const createInventoryItem = createServerFn({ method: 'POST' })
@@ -1039,6 +1045,12 @@ export const createInventoryItem = createServerFn({ method: 'POST' })
             ? true
             : false,
           isFavorite: data.isFavorite ?? false,
+          isOnline: data.isOnline ?? false,
+          shippingWeightGrams: data.shippingWeightGrams ?? null,
+          onlineStockCap:
+            data.onlineStockCap != null
+              ? data.onlineStockCap.toString()
+              : null,
         })
         .returning()
 
@@ -1423,6 +1435,20 @@ export const updateInventoryItem = createServerFn({ method: 'POST' })
           : {}),
         ...(updates.isFavorite !== undefined
           ? { isFavorite: updates.isFavorite }
+          : {}),
+        ...(updates.isOnline !== undefined
+          ? { isOnline: updates.isOnline }
+          : {}),
+        ...(updates.shippingWeightGrams !== undefined
+          ? { shippingWeightGrams: updates.shippingWeightGrams ?? null }
+          : {}),
+        ...(updates.onlineStockCap !== undefined
+          ? {
+              onlineStockCap:
+                updates.onlineStockCap != null
+                  ? updates.onlineStockCap.toString()
+                  : null,
+            }
           : {}),
         updatedAt: new Date(),
       })

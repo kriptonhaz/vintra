@@ -1233,6 +1233,105 @@ export function BookingFields({
 }
 
 /**
+ * Toko Online curation fields. "Jual online" surfaces the item in the
+ * public storefront catalog; when on, the tenant can set an optional
+ * shipping weight (manual ongkir reference) and an optional online
+ * stock cap. Independent from `isSellable` (POS grid).
+ */
+export function OnlineFields({
+  control,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  control: any
+}) {
+  const isOnline = useWatch({ control, name: 'isOnline' }) as boolean | undefined
+  return (
+    <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+      <Controller
+        name="isOnline"
+        control={control}
+        render={({ field }) => (
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={field.value ?? false}
+              onChange={(e) => field.onChange(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span className="text-sm">
+              <span className="block font-medium text-gray-900 dark:text-gray-100">
+                Jual online
+              </span>
+              <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
+                Tampilkan item ini di toko online (situs) supaya bisa
+                dibeli pengunjung lewat keranjang.
+              </span>
+            </span>
+          </label>
+        )}
+      />
+
+      {isOnline && (
+        <div className="ml-7 grid gap-3 border-l-2 border-gray-200 pl-4 dark:border-gray-700 sm:grid-cols-2">
+          <Controller
+            name="shippingWeightGrams"
+            control={control}
+            render={({ field }) => (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Berat kirim (gram)
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={field.value ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    field.onChange(v === '' ? null : parseInt(v, 10))
+                  }}
+                  placeholder="cth. 500"
+                  className="tabular-nums"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Opsional, untuk referensi ongkir.
+                </p>
+              </div>
+            )}
+          />
+
+          <Controller
+            name="onlineStockCap"
+            control={control}
+            render={({ field }) => (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Batas stok online
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={field.value ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    field.onChange(v === '' ? null : Number(v))
+                  }}
+                  placeholder="Pakai stok penuh"
+                  className="tabular-nums"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Kosongkan = jual sebanyak stok tersedia.
+                </p>
+              </div>
+            )}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * Prep-mode toggle (JUR-15). Only shown when the item has a recipe
  * link (`linkSource === 'product'`). Flips the POS sale path between
  * "auto-deduct ingredients per sale" (off) and "manually run Prep
