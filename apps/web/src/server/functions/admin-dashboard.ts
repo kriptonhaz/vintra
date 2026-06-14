@@ -19,12 +19,13 @@ import {
   waInstances,
   waSubscriptionPlans,
   platformAdminAuditLogs,
+  compGrants,
 } from '@vintra/db/schema'
 import {
   POS_PLANS,
   INVENTORY_PLANS,
 } from '@vintra/shared/constants/pricing'
-import { and, count, desc, eq, gte, isNull, or, sql, sum } from 'drizzle-orm'
+import { and, count, desc, eq, gte, isNull, or, sql } from 'drizzle-orm'
 import { requirePlatformAdmin } from '../middleware/platform-admin'
 
 // MRR helper — finds the lowest pricePerMonth across all plans matching
@@ -48,6 +49,13 @@ function tierMrr(plans: readonly PriceableTier[], tier: string): number {
 //   - whatsapp:        same as above (has both `tier` and `subscriptionActive`)
 //   - attendance:      subscriptionActive=true AND (expiry null OR > now)
 //                      — no `tier` column; per-staff billing.
+//
+// A comp grant (JUR-194) activates a module at Rp 0 by setting the very
+// same subscription_active / expiry columns, so it's indistinguishable
+// from a paid sub at the settings-table level. We therefore pull the
+// active comp grants separately and SUBTRACT comped tenants from both
+// the paid-module tally and the MRR estimate — a free grant is not
+// revenue and the cards are explicitly about paid usage.
 //
 // Attendance MRR uses a conservative Rp/staff/month rate from the 12-mo
 // plan; we count billed_staff_count rather than tenants.
@@ -133,10 +141,11 @@ export const getAdminDashboardStats = createServerFn({ method: 'POST' }).handler
       newMembersRaw,
       posActiveRows,
       invActiveRows,
-      attActiveAgg,
+      attActiveRows,
       waActiveRows,
       activeWaInstancesRow,
       recentAuditRows,
+      activeCompRows,
     ] = await Promise.all([
       db
         .select({ n: count() })
@@ -163,9 +172,10 @@ export const getAdminDashboardStats = createServerFn({ method: 'POST' }).handler
         .select({ createdAt: tenantMembers.createdAt })
         .from(tenantMembers)
         .where(gte(tenantMembers.createdAt, d7)),
-      // POS: tier != 'free' AND not expired.
+      // POS: tier != 'free' AND not expired. tenantId carried so comped
+      // tenants can be filtered out below.
       db
-        .select({ tier: posSettings.tier })
+        .select({ tenantId: posSettings.tenantId, tier: posSettings.tier })
         .from(posSettings)
         .where(
           and(
@@ -178,7 +188,10 @@ export const getAdminDashboardStats = createServerFn({ method: 'POST' }).handler
         ),
       // Inventory: same shape as POS.
       db
-        .select({ tier: inventorySettings.tier })
+        .select({
+          tenantId: inventorySettings.tenantId,
+          tier: inventorySettings.tier,
+        })
         .from(inventorySettings)
         .where(
           and(
@@ -189,12 +202,13 @@ export const getAdminDashboardStats = createServerFn({ method: 'POST' }).handler
             ),
           ),
         ),
-      // Attendance: per-staff. Sum billed_staff_count across active
-      // tenants for MRR; row count for the module-count card.
+      // Attendance: per-staff. One row per active tenant carrying its
+      // billed_staff_count, aggregated in JS after comps are filtered
+      // out (an aggregate query can't subtract comped tenants cleanly).
       db
         .select({
-          tenants: count(),
-          staff: sum(attendanceSettings.billedStaffCount),
+          tenantId: attendanceSettings.tenantId,
+          staff: attendanceSettings.billedStaffCount,
         })
         .from(attendanceSettings)
         .where(
@@ -209,6 +223,7 @@ export const getAdminDashboardStats = createServerFn({ method: 'POST' }).handler
       // WhatsApp join: tier price lives in wa_subscription_plans.
       db
         .select({
+          tenantId: waSettings.tenantId,
           tier: waSettings.tier,
           price: waSubscriptionPlans.priceIdr,
         })
@@ -235,6 +250,24 @@ export const getAdminDashboardStats = createServerFn({ method: 'POST' }).handler
         .from(platformAdminAuditLogs)
         .orderBy(desc(platformAdminAuditLogs.createdAt))
         .limit(10),
+      // Active comp grants (Rp 0 free-access). status='applied' and not
+      // expired. Used to subtract comped tenants from the paid tally + MRR.
+      db
+        .select({
+          tenantId: compGrants.tenantId,
+          moduleKey: compGrants.moduleKey,
+          planKey: compGrants.planKey,
+        })
+        .from(compGrants)
+        .where(
+          and(
+            eq(compGrants.status, 'applied'),
+            or(
+              isNull(compGrants.expiresAt),
+              gte(compGrants.expiresAt, now),
+            ),
+          ),
+        ),
     ])
 
     // Bucket raw timestamps into 7 daily counts for sparklines.
@@ -245,14 +278,47 @@ export const getAdminDashboardStats = createServerFn({ method: 'POST' }).handler
       newMembersRaw.map((r) => r.createdAt),
     )
 
+    // Build per-module sets of comped tenants. A 'komplit' POS comp
+    // bundles Inventory + Attendance (see applyCompGrant) but records
+    // only one comp_grants row with moduleKey='pos', so expand it here.
+    const compPos = new Set<string>()
+    const compInv = new Set<string>()
+    const compAtt = new Set<string>()
+    const compWa = new Set<string>()
+    for (const g of activeCompRows) {
+      if (g.moduleKey === 'pos') {
+        compPos.add(g.tenantId)
+        if (g.planKey === 'komplit') {
+          compInv.add(g.tenantId)
+          compAtt.add(g.tenantId)
+        }
+      } else if (g.moduleKey === 'inventory') {
+        compInv.add(g.tenantId)
+      } else if (g.moduleKey === 'attendance') {
+        compAtt.add(g.tenantId)
+      } else if (g.moduleKey === 'whatsapp') {
+        compWa.add(g.tenantId)
+      }
+    }
+
+    // Paid (non-comp) active rows — drive both the paid-module tally and
+    // the MRR estimate. Comped tenants are excluded so a free grant
+    // shows up as neither a paid module nor revenue.
+    const posPaidRows = posActiveRows.filter((r) => !compPos.has(r.tenantId))
+    const invPaidRows = invActiveRows.filter((r) => !compInv.has(r.tenantId))
+    const attPaidRows = attActiveRows.filter((r) => !compAtt.has(r.tenantId))
+    const waPaidRows = waActiveRows.filter((r) => !compWa.has(r.tenantId))
+
     // Module counts.
-    const attActiveTenants = Number(attActiveAgg[0]?.tenants ?? 0)
-    const attBilledStaff = Number(attActiveAgg[0]?.staff ?? 0)
+    const attBilledStaff = attPaidRows.reduce(
+      (s, r) => s + Number(r.staff ?? 0),
+      0,
+    )
     const modulesActive = {
-      pos: posActiveRows.length,
-      inventory: invActiveRows.length,
-      attendance: attActiveTenants,
-      whatsapp: waActiveRows.length,
+      pos: posPaidRows.length,
+      inventory: invPaidRows.length,
+      attendance: attPaidRows.length,
+      whatsapp: waPaidRows.length,
       total: 0,
     }
     modulesActive.total =
@@ -264,15 +330,15 @@ export const getAdminDashboardStats = createServerFn({ method: 'POST' }).handler
     // MRR — pos + inventory from constants (conservative annual rate),
     // whatsapp from the DB join, attendance from billed_staff_count ×
     // conservative per-staff rate.
-    const posMrr = posActiveRows.reduce(
+    const posMrr = posPaidRows.reduce(
       (s, r) => s + tierMrr(POS_PLANS, r.tier),
       0,
     )
-    const invMrr = invActiveRows.reduce(
+    const invMrr = invPaidRows.reduce(
       (s, r) => s + tierMrr(INVENTORY_PLANS, r.tier),
       0,
     )
-    const waMrr = waActiveRows.reduce(
+    const waMrr = waPaidRows.reduce(
       (s, r) => s + Number(r.price ?? 0),
       0,
     )
