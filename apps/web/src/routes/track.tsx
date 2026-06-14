@@ -8,10 +8,11 @@
  */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useState } from 'react'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Star, Check } from 'lucide-react'
 import {
   getStorefrontContext,
   trackOrder,
+  submitProductReview,
 } from '@/server/functions/storefront'
 import { TrackResultView } from '@/lib/site-templates/sections-v2/shop'
 
@@ -114,7 +115,177 @@ function TrackPage() {
             <TrackResultView result={result} brandColor={brandColor} />
           </div>
         )}
+
+        {result?.found && result.canReview && (
+          <ReviewSection
+            slug={slug}
+            orderNumber={result.orderNumber}
+            phone={phone.trim()}
+            items={result.items}
+            brandColor={brandColor}
+          />
+        )}
       </main>
+    </div>
+  )
+}
+
+type TrackResult = NonNullable<Awaited<ReturnType<typeof trackOrder>>>
+type TrackItem = Extract<TrackResult, { found: true }>['items'][number]
+
+/**
+ * Per-product review forms for a completed order. Lists each distinct
+ * purchased product (deduped by itemId) that hasn't been reviewed yet,
+ * with a star picker + optional comment.
+ */
+function ReviewSection({
+  slug,
+  orderNumber,
+  phone,
+  items,
+  brandColor,
+}: {
+  slug: string
+  orderNumber: string
+  phone: string
+  items: TrackItem[]
+  brandColor: string
+}) {
+  // Dedupe to one entry per product; skip lines with no itemId (deleted
+  // catalog item) and ones already reviewed.
+  const seen = new Set<string>()
+  const reviewable = items.filter((i) => {
+    if (!i.itemId || i.reviewed || seen.has(i.itemId)) return false
+    seen.add(i.itemId)
+    return true
+  })
+
+  if (reviewable.length === 0) return null
+
+  return (
+    <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-4">
+      <h2 className="text-sm font-bold">Beri ulasan</h2>
+      <p className="mt-0.5 text-xs text-gray-500">
+        Bagikan pengalamanmu untuk produk yang sudah kamu terima.
+      </p>
+      <div className="mt-3 space-y-3">
+        {reviewable.map((it) => (
+          <ReviewForm
+            key={it.itemId}
+            slug={slug}
+            orderNumber={orderNumber}
+            phone={phone}
+            itemId={it.itemId!}
+            productName={it.name}
+            brandColor={brandColor}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ReviewForm({
+  slug,
+  orderNumber,
+  phone,
+  itemId,
+  productName,
+  brandColor,
+}: {
+  slug: string
+  orderNumber: string
+  phone: string
+  itemId: string
+  productName: string
+  brandColor: string
+}) {
+  const [rating, setRating] = useState(0)
+  const [hover, setHover] = useState(0)
+  const [comment, setComment] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit() {
+    if (rating < 1) {
+      setError('Pilih jumlah bintang dulu')
+      return
+    }
+    setError(null)
+    setSubmitting(true)
+    try {
+      const res = await submitProductReview({
+        data: {
+          slug,
+          orderNumber,
+          phone,
+          itemId,
+          rating,
+          comment: comment.trim() || undefined,
+        },
+      })
+      if (res.ok) setDone(true)
+      else setError(res.message)
+    } catch {
+      setError('Gagal mengirim ulasan')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2.5 text-sm text-green-700">
+        <Check className="h-4 w-4" />
+        Terima kasih atas ulasan untuk {productName}!
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3">
+      <p className="text-sm font-medium text-gray-900">{productName}</p>
+      <div className="mt-1.5 flex items-center gap-1">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => setRating(n)}
+            onMouseEnter={() => setHover(n)}
+            onMouseLeave={() => setHover(0)}
+            aria-label={`${n} bintang`}
+            className="p-0.5"
+          >
+            <Star
+              className="h-6 w-6"
+              style={{
+                color: '#f59e0b',
+                fill: (hover || rating) >= n ? '#f59e0b' : 'transparent',
+              }}
+            />
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="Tulis ulasan (opsional)"
+        rows={2}
+        maxLength={1000}
+        className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+      />
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      <button
+        type="button"
+        onClick={submit}
+        disabled={submitting}
+        className="mt-2 flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        style={{ backgroundColor: brandColor }}
+      >
+        {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+        Kirim ulasan
+      </button>
     </div>
   )
 }

@@ -18,6 +18,7 @@ import { db } from '@vintra/db'
 import {
   onlineOrders,
   onlineOrderItems,
+  onlineProductReviews,
   inventoryItems,
   inventoryMovements,
   inventoryStockBalances,
@@ -372,5 +373,63 @@ export const cancelOnlineOrder = createServerFn({ method: 'POST' })
         })
         .where(eq(onlineOrders.id, order.id))
     })
+    return { success: true as const }
+  })
+
+// ─── Reviews (moderation) ──────────────────────────────────────────
+
+/**
+ * Lists product reviews for the tenant's storefront, newest first, with
+ * the product name resolved. Auto-published reviews show here so the
+ * admin can hide any that are abusive/spam.
+ */
+export const listStorefrontReviews = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z
+      .object({ includeHidden: z.boolean().optional() })
+      .optional()
+      .default({}),
+  )
+  .handler(async ({ data }) => {
+    const auth = await requireTenantSiteAccess()
+    const rows = await db
+      .select({
+        id: onlineProductReviews.id,
+        itemId: onlineProductReviews.itemId,
+        productName: inventoryItems.name,
+        customerName: onlineProductReviews.customerName,
+        rating: onlineProductReviews.rating,
+        comment: onlineProductReviews.comment,
+        isHidden: onlineProductReviews.isHidden,
+        createdAt: onlineProductReviews.createdAt,
+      })
+      .from(onlineProductReviews)
+      .leftJoin(
+        inventoryItems,
+        eq(inventoryItems.id, onlineProductReviews.itemId),
+      )
+      .where(eq(onlineProductReviews.tenantId, auth.tenantId))
+      .orderBy(desc(onlineProductReviews.createdAt))
+      .limit(500)
+    return data?.includeHidden ? rows : rows.filter((r) => !r.isHidden)
+  })
+
+/** Hide or unhide a review (moderation). */
+export const setStorefrontReviewHidden = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({ id: z.string().uuid(), hidden: z.boolean() }),
+  )
+  .handler(async ({ data }) => {
+    const auth = await requireTenantSiteAccess()
+    assertManage(auth)
+    await db
+      .update(onlineProductReviews)
+      .set({ isHidden: data.hidden })
+      .where(
+        and(
+          eq(onlineProductReviews.id, data.id),
+          eq(onlineProductReviews.tenantId, auth.tenantId),
+        ),
+      )
     return { success: true as const }
   })

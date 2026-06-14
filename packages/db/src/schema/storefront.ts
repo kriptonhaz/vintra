@@ -305,3 +305,48 @@ export const onlineOrderItems = pgTable(
     orderIdx: index('online_order_items_order_idx').on(t.orderId),
   }),
 )
+
+/**
+ * Customer product reviews — rating (1–5) + optional comment. Gated to
+ * buyers: a review can only be created against an order that contains the
+ * item AND has reached `completed` status (the customer received it). The
+ * public submit path (see storefront server fns) re-verifies ownership
+ * via order number + phone, the same proof used by order tracking. One
+ * review per (order, item) — the unique constraint enforces. Auto-
+ * published; admins can hide a review (`is_hidden`) for moderation.
+ */
+export const onlineProductReviews = pgTable(
+  'online_product_reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    itemId: uuid('item_id')
+      .references(() => inventoryItems.id, { onDelete: 'cascade' })
+      .notNull(),
+    orderId: uuid('order_id')
+      .references(() => onlineOrders.id, { onDelete: 'cascade' })
+      .notNull(),
+    /** Snapshot of the buyer's name at review time. */
+    customerName: text('customer_name').notNull(),
+    /** Normalised "62…" phone — matches the order's customerPhone. */
+    customerPhone: text('customer_phone').notNull(),
+    rating: integer('rating').notNull(),
+    comment: text('comment'),
+    /** Admin moderation: hide without deleting. Default visible. */
+    isHidden: boolean('is_hidden').notNull().default(false),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    orderItemUnique: unique('online_product_reviews_order_item_unique').on(
+      t.orderId,
+      t.itemId,
+    ),
+    itemIdx: index('online_product_reviews_item_idx').on(t.itemId),
+    ratingChk: check(
+      'online_product_reviews_rating_chk',
+      sql`${t.rating} >= 1 AND ${t.rating} <= 5`,
+    ),
+  }),
+)

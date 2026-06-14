@@ -32,8 +32,20 @@ import {
   onlineOrders,
   onlineOrderItems,
   onlineOrderCounters,
+  onlineProductReviews,
 } from '@vintra/db/schema'
-import { eq, and, inArray, asc, sql, isNull, or, lte, gte } from 'drizzle-orm'
+import {
+  eq,
+  and,
+  inArray,
+  asc,
+  desc,
+  sql,
+  isNull,
+  or,
+  lte,
+  gte,
+} from 'drizzle-orm'
 import { getRequest } from '@tanstack/react-start/server'
 import { getInventoryPhotoSignedUrl } from '@/lib/s3-storage'
 import { getTenantSiteAccessForTenantId } from '../middleware/module-access'
@@ -48,6 +60,21 @@ function normalizePhone(input: string | null | undefined): string | null {
   if (digits.startsWith('0')) digits = '62' + digits.slice(1)
   else if (digits.startsWith('8')) digits = '62' + digits
   return digits
+}
+
+/**
+ * Masks a reviewer's name for public display: first word kept, the rest
+ * reduced to an initial + "***" (e.g. "Budi Santoso" → "Budi S***",
+ * "Budi" → "Budi"). Keeps reviews feeling personal without exposing the
+ * full identity of a buyer.
+ */
+function maskName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  const first = parts[0]
+  if (!first) return 'Pembeli'
+  const second = parts[1]
+  if (!second) return first
+  return `${first} ${second[0]!.toUpperCase()}***`
 }
 
 type ResolvedTenant = {
@@ -266,6 +293,29 @@ export const getStorefrontProduct = createServerFn()
     ).filter((u): u is string => !!u)
     const images = [...(imageUrl ? [imageUrl] : []), ...galleryUrls]
 
+    // Visible reviews (newest first) + summary for this product.
+    const reviewRows = await db
+      .select({
+        customerName: onlineProductReviews.customerName,
+        rating: onlineProductReviews.rating,
+        comment: onlineProductReviews.comment,
+        createdAt: onlineProductReviews.createdAt,
+      })
+      .from(onlineProductReviews)
+      .where(
+        and(
+          eq(onlineProductReviews.itemId, item.id),
+          eq(onlineProductReviews.isHidden, false),
+        ),
+      )
+      .orderBy(desc(onlineProductReviews.createdAt))
+      .limit(50)
+    const reviewCount = reviewRows.length
+    const ratingAvg =
+      reviewCount > 0
+        ? reviewRows.reduce((s, r) => s + r.rating, 0) / reviewCount
+        : 0
+
     return {
       slug,
       businessName: tenant.businessName,
@@ -276,6 +326,14 @@ export const getStorefrontProduct = createServerFn()
         description: item.notes?.trim() || null,
         imageUrl,
         images,
+        ratingAvg,
+        reviewCount,
+        reviews: reviewRows.map((r) => ({
+          customerName: maskName(r.customerName),
+          rating: r.rating,
+          comment: r.comment,
+          createdAt: r.createdAt.toISOString(),
+        })),
         unitPrice,
         available,
         weightGrams: item.shippingWeightGrams,
@@ -532,6 +590,32 @@ export const getStorefront = createServerFn()
       }
     }
 
+    // Rating summary per item (visible reviews only) for the cards.
+    const ratingByItem = new Map<string, { avg: number; count: number }>()
+    const allItemIds = itemRows.map((r) => r.id)
+    if (allItemIds.length > 0) {
+      const aggRows = await db
+        .select({
+          itemId: onlineProductReviews.itemId,
+          avg: sql<number>`avg(${onlineProductReviews.rating})`,
+          count: sql<number>`count(*)`,
+        })
+        .from(onlineProductReviews)
+        .where(
+          and(
+            inArray(onlineProductReviews.itemId, allItemIds),
+            eq(onlineProductReviews.isHidden, false),
+          ),
+        )
+        .groupBy(onlineProductReviews.itemId)
+      for (const a of aggRows) {
+        ratingByItem.set(a.itemId, {
+          avg: Number(a.avg),
+          count: Number(a.count),
+        })
+      }
+    }
+
     const products = itemRows.map((r) => {
       const variants = r.hasVariants ? (variantsByItem.get(r.id) ?? []) : []
       // For variant items, the card shows the cheapest variant ("mulai
@@ -548,6 +632,7 @@ export const getStorefront = createServerFn()
         : branchId
           ? (availByItem.get(r.id) ?? 0)
           : null
+      const rating = ratingByItem.get(r.id)
       return {
         id: r.id,
         name: r.name,
@@ -559,6 +644,8 @@ export const getStorefront = createServerFn()
         hasVariants: r.hasVariants,
         variantConfig: r.hasVariants ? r.variantConfig : null,
         variants,
+        ratingAvg: rating?.avg ?? 0,
+        reviewCount: rating?.count ?? 0,
       }
     })
 
@@ -690,6 +777,7 @@ export const trackOrder = createServerFn({ method: 'POST' })
 
     const [order] = await db
       .select({
+        id: onlineOrders.id,
         orderNumber: onlineOrders.orderNumber,
         status: onlineOrders.status,
         fulfillmentType: onlineOrders.fulfillmentType,
@@ -713,19 +801,27 @@ export const trackOrder = createServerFn({ method: 'POST' })
 
     const items = await db
       .select({
+        itemId: onlineOrderItems.itemId,
         nameSnapshot: onlineOrderItems.nameSnapshot,
         variantLabel: onlineOrderItems.variantLabel,
         qty: onlineOrderItems.qty,
         subtotal: onlineOrderItems.subtotal,
       })
       .from(onlineOrderItems)
-      .innerJoin(onlineOrders, eq(onlineOrders.id, onlineOrderItems.orderId))
-      .where(
-        and(
-          eq(onlineOrders.tenantId, tenant.id),
-          eq(onlineOrders.orderNumber, order.orderNumber),
-        ),
-      )
+      .where(eq(onlineOrderItems.orderId, order.id))
+
+    // Reviews are only offered once the buyer has the product
+    // (completed order). Mark which items they've already reviewed so the
+    // UI can hide the form for those.
+    const canReview = order.status === 'completed'
+    let reviewedItemIds = new Set<string>()
+    if (canReview) {
+      const existing = await db
+        .select({ itemId: onlineProductReviews.itemId })
+        .from(onlineProductReviews)
+        .where(eq(onlineProductReviews.orderId, order.id))
+      reviewedItemIds = new Set(existing.map((r) => r.itemId))
+    }
 
     return {
       found: true as const,
@@ -737,13 +833,97 @@ export const trackOrder = createServerFn({ method: 'POST' })
       courierName: order.courierName,
       trackingNumber: order.trackingNumber,
       cancelReason: order.cancelReason,
+      canReview,
       items: items.map((i) => ({
+        itemId: i.itemId,
         name: i.nameSnapshot,
         variantLabel: i.variantLabel,
         qty: Number(i.qty),
         subtotal: Number(i.subtotal),
+        reviewed: i.itemId ? reviewedItemIds.has(i.itemId) : false,
       })),
     }
+  })
+
+// ─── product reviews ───────────────────────────────────────────────
+
+/**
+ * Submit a product review. Gated to buyers: the order must belong to the
+ * given phone (same proof as tracking), be `completed`, and contain the
+ * item. One review per (order, item) — a duplicate is reported as already
+ * reviewed. Auto-published.
+ */
+export const submitProductReview = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      slug: z.string(),
+      orderNumber: z.string().min(1).max(40),
+      phone: z.string().min(4).max(25),
+      itemId: z.string().uuid(),
+      rating: z.coerce.number().int().min(1).max(5),
+      comment: z.string().max(1000).optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const tenant = await resolveTenant(data.slug)
+    if (!tenant) return { ok: false as const, message: 'Toko tidak ditemukan' }
+    const phone = normalizePhone(data.phone)
+    if (!phone) return { ok: false as const, message: 'Nomor tidak valid' }
+
+    const [order] = await db
+      .select({
+        id: onlineOrders.id,
+        status: onlineOrders.status,
+        customerName: onlineOrders.customerName,
+      })
+      .from(onlineOrders)
+      .where(
+        and(
+          eq(onlineOrders.tenantId, tenant.id),
+          sql`upper(${onlineOrders.orderNumber}) = upper(${data.orderNumber.trim()})`,
+          eq(onlineOrders.customerPhone, phone),
+        ),
+      )
+      .limit(1)
+    if (!order) {
+      return { ok: false as const, message: 'Pesanan tidak ditemukan' }
+    }
+    if (order.status !== 'completed') {
+      return {
+        ok: false as const,
+        message: 'Ulasan bisa diberi setelah pesanan selesai',
+      }
+    }
+
+    const [line] = await db
+      .select({ id: onlineOrderItems.id })
+      .from(onlineOrderItems)
+      .where(
+        and(
+          eq(onlineOrderItems.orderId, order.id),
+          eq(onlineOrderItems.itemId, data.itemId),
+        ),
+      )
+      .limit(1)
+    if (!line) {
+      return { ok: false as const, message: 'Produk tidak ada di pesanan ini' }
+    }
+
+    try {
+      await db.insert(onlineProductReviews).values({
+        tenantId: tenant.id,
+        itemId: data.itemId,
+        orderId: order.id,
+        customerName: order.customerName,
+        customerPhone: phone,
+        rating: data.rating,
+        comment: data.comment?.trim() || null,
+      })
+    } catch {
+      // Unique (order, item) violation → already reviewed.
+      return { ok: false as const, message: 'Produk ini sudah kamu ulas' }
+    }
+    return { ok: true as const }
   })
 
 /** Atomic per-tenant order number: ORD-YYYY-00001. Mirrors nextSaleNumber. */

@@ -22,6 +22,7 @@ import {
   Check,
   Loader2,
   Search,
+  Star,
 } from 'lucide-react'
 import { formatRupiah } from '@/lib/currency'
 import { useCart, cartLineKey } from '@/lib/storefront/cart-store'
@@ -315,6 +316,15 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
                         ? `mulai ${formatRupiah(Number(p.unitPrice))}`
                         : formatRupiah(Number(p.unitPrice))}
                     </p>
+                    {p.reviewCount > 0 && (
+                      <div className="mt-1 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                        <span className="font-medium text-gray-700 dark:text-gray-300">
+                          {p.ratingAvg.toFixed(1)}
+                        </span>
+                        <span>({p.reviewCount})</span>
+                      </div>
+                    )}
                     {soldOut ? (
                       <span className="mt-auto pt-2 text-xs font-medium text-gray-400">
                         Stok habis

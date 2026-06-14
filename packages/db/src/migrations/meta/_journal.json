@@ -932,6 +932,13 @@
       "when": 1786449600000,
       "tag": "0132_inventory_item_photos",
       "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1786536000000,
+      "tag": "0133_online_product_reviews",
+      "breakpoints": true
     }
   ]
 }

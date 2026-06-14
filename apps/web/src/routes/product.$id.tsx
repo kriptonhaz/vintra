@@ -12,7 +12,7 @@
  */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useState } from 'react'
-import { ArrowLeft, ShoppingCart, Plus, Minus, Check } from 'lucide-react'
+import { ArrowLeft, ShoppingCart, Plus, Minus, Check, Star } from 'lucide-react'
 import { getStorefrontProduct } from '@/server/functions/storefront'
 import { useCart } from '@/lib/storefront/cart-store'
 import { formatRupiah } from '@/lib/currency'
@@ -97,6 +97,14 @@ function ProductDetailPage() {
             cart={cart}
           />
         </div>
+
+        {/* Reviews */}
+        <ProductReviews
+          ratingAvg={product.ratingAvg}
+          reviewCount={product.reviewCount}
+          reviews={product.reviews}
+          brandColor={brandColor}
+        />
       </main>
 
       <footer className="border-t border-gray-100 py-6 text-center text-xs text-gray-400">
@@ -225,6 +233,14 @@ function ProductBuyBox({
       <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
         {product.name}
       </h1>
+      {product.reviewCount > 0 && (
+        <div className="mt-2 flex items-center gap-2">
+          <Stars value={product.ratingAvg} />
+          <span className="text-sm text-gray-500">
+            {product.ratingAvg.toFixed(1)} · {product.reviewCount} ulasan
+          </span>
+        </div>
+      )}
       <p className="mt-2 text-2xl font-bold" style={{ color: brandColor }}>
         {isVariant && !variant
           ? `mulai ${formatRupiah(Number(product.unitPrice))}`
@@ -344,5 +360,108 @@ function ProductBuyBox({
         </a>
       )}
     </div>
+  )
+}
+
+/** Star row. `value` is 0–5; renders filled / half / empty. */
+export function Stars({
+  value,
+  size = 16,
+}: {
+  value: number
+  size?: number
+}) {
+  return (
+    <div className="flex items-center gap-0.5" aria-hidden="true">
+      {[0, 1, 2, 3, 4].map((i) => {
+        const fill = Math.max(0, Math.min(1, value - i))
+        return (
+          <div
+            key={i}
+            className="relative"
+            style={{ width: size, height: size }}
+          >
+            <Star
+              className="absolute inset-0 text-gray-300"
+              style={{ width: size, height: size }}
+            />
+            <div
+              className="absolute inset-0 overflow-hidden"
+              style={{ width: `${fill * 100}%` }}
+            >
+              <Star
+                className="text-amber-400"
+                style={{ width: size, height: size, fill: 'currentColor' }}
+              />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+type ReviewItem = Product['reviews'][number]
+
+function ProductReviews({
+  ratingAvg,
+  reviewCount,
+  reviews,
+  brandColor,
+}: {
+  ratingAvg: number
+  reviewCount: number
+  reviews: ReviewItem[]
+  brandColor: string
+}) {
+  return (
+    <section className="mt-10 border-t border-gray-100 pt-8">
+      <h2 className="text-lg font-bold">Ulasan pembeli</h2>
+      {reviewCount === 0 ? (
+        <p className="mt-2 text-sm text-gray-500">
+          Belum ada ulasan. Ulasan muncul setelah pembeli menerima pesanannya.
+        </p>
+      ) : (
+        <>
+          <div className="mt-2 flex items-center gap-3">
+            <span className="text-3xl font-bold" style={{ color: brandColor }}>
+              {ratingAvg.toFixed(1)}
+            </span>
+            <div>
+              <Stars value={ratingAvg} size={18} />
+              <p className="mt-0.5 text-xs text-gray-500">
+                {reviewCount} ulasan
+              </p>
+            </div>
+          </div>
+          <ul className="mt-5 space-y-4">
+            {reviews.map((r, i) => (
+              <li key={i} className="border-b border-gray-100 pb-4 last:border-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-gray-900">
+                    {r.customerName}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {new Date(r.createdAt).toLocaleDateString('id-ID', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                    })}
+                  </span>
+                </div>
+                <div className="mt-1">
+                  <Stars value={r.rating} size={14} />
+                </div>
+                {r.comment && (
+                  <p className="mt-1.5 whitespace-pre-line text-sm text-gray-600">
+                    {r.comment}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
   )
 }

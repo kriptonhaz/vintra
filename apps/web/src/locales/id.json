@@ -58,6 +58,7 @@
     "siteEdit": "Editor Situs",
     "siteStore": "Toko Online",
     "siteOrders": "Pesanan Online",
+    "siteReviews": "Ulasan Produk",
     "siteAnalytics": "Analitik Situs",
     "cashflow": "Arus Kas",
     "cashflowDashboard": "Dashboard Arus Kas",
@@ -2358,7 +2359,8 @@
     "navEditor": "Editor Situs",
     "navAnalytics": "Analitik",
     "navStore": "Toko Online",
-    "navOrders": "Pesanan Online"
+    "navOrders": "Pesanan Online",
+    "navReviews": "Ulasan"
   },
   "booking": {
     "navCalendar": "Kalender Booking",
