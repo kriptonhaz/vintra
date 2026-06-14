@@ -25,6 +25,7 @@ import {
 import { getHppPhotoUrls } from '@/server/functions/hpp'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PhotoUploadField } from '@/components/inventory/photo-upload-field'
+import { GalleryUploadField } from '@/components/inventory/gallery-upload-field'
 import { ApplyHppBanner } from '@/components/inventory/apply-hpp-banner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -1240,9 +1241,12 @@ export function BookingFields({
  */
 export function OnlineFields({
   control,
+  itemId,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   control: any
+  /** When set (edit form), enables the storefront photo gallery. */
+  itemId?: string
 }) {
   const isOnline = useWatch({ control, name: 'isOnline' }) as boolean | undefined
   return (
@@ -1325,6 +1329,15 @@ export function OnlineFields({
               </div>
             )}
           />
+
+          {itemId && (
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                Foto tambahan
+              </label>
+              <GalleryUploadField itemId={itemId} />
+            </div>
+          )}
         </div>
       )}
     </div>

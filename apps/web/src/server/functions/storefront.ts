@@ -21,6 +21,7 @@ import {
   storefrontShippingZones,
   inventoryItems,
   inventoryItemUnitPricing,
+  inventoryItemPhotos,
   inventoryStockBalances,
   inventoryItemVariants,
   inventoryItemVariantStock,
@@ -245,6 +246,26 @@ export const getStorefrontProduct = createServerFn()
       }
     }
 
+    // Gallery: cover first (if any), then the extra photos in order.
+    const galleryRows = await db
+      .select({ photoKey: inventoryItemPhotos.photoKey })
+      .from(inventoryItemPhotos)
+      .where(eq(inventoryItemPhotos.itemId, item.id))
+      .orderBy(
+        asc(inventoryItemPhotos.sortOrder),
+        asc(inventoryItemPhotos.createdAt),
+      )
+    const galleryUrls = (
+      await Promise.all(
+        galleryRows.map((r) =>
+          getInventoryPhotoSignedUrl(r.photoKey, 7 * 24 * 3600).catch(
+            () => null,
+          ),
+        ),
+      )
+    ).filter((u): u is string => !!u)
+    const images = [...(imageUrl ? [imageUrl] : []), ...galleryUrls]
+
     return {
       slug,
       businessName: tenant.businessName,
@@ -254,6 +275,7 @@ export const getStorefrontProduct = createServerFn()
         name: item.name,
         description: item.notes?.trim() || null,
         imageUrl,
+        images,
         unitPrice,
         available,
         weightGrams: item.shippingWeightGrams,

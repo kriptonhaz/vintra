@@ -82,21 +82,12 @@ function ProductDetailPage() {
 
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
         <div className="grid gap-6 sm:gap-10 lg:grid-cols-2">
-          {/* Photo */}
-          <div className="overflow-hidden rounded-2xl bg-gray-50">
-            {product.imageUrl ? (
-              <img
-                src={product.imageUrl}
-                alt={product.name}
-                className="aspect-square w-full object-contain"
-              />
-            ) : (
-              <div
-                className="aspect-square w-full opacity-20"
-                style={{ backgroundColor: brandColor }}
-              />
-            )}
-          </div>
+          {/* Photo gallery */}
+          <ProductGallery
+            images={product.images}
+            name={product.name}
+            brandColor={brandColor}
+          />
 
           {/* Details + buy box */}
           <ProductBuyBox
@@ -111,6 +102,64 @@ function ProductDetailPage() {
       <footer className="border-t border-gray-100 py-6 text-center text-xs text-gray-400">
         Powered by Vintra
       </footer>
+    </div>
+  )
+}
+
+function ProductGallery({
+  images,
+  name,
+  brandColor,
+}: {
+  images: string[]
+  name: string
+  brandColor: string
+}) {
+  const [active, setActive] = useState(0)
+
+  if (images.length === 0) {
+    return (
+      <div className="overflow-hidden rounded-2xl bg-gray-50">
+        <div
+          className="aspect-square w-full opacity-20"
+          style={{ backgroundColor: brandColor }}
+        />
+      </div>
+    )
+  }
+
+  const current = images[Math.min(active, images.length - 1)]
+  return (
+    <div>
+      <div className="overflow-hidden rounded-2xl bg-gray-50">
+        <img
+          src={current}
+          alt={name}
+          className="aspect-square w-full object-contain"
+        />
+      </div>
+      {images.length > 1 && (
+        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+          {images.map((src, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setActive(i)}
+              className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border-2 bg-gray-50 transition"
+              style={{
+                borderColor: i === active ? brandColor : 'transparent',
+              }}
+              aria-label={`Foto ${i + 1}`}
+            >
+              <img
+                src={src}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

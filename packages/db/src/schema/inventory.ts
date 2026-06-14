@@ -774,3 +774,31 @@ export const inventoryItemVariantStock = pgTable(
     ),
   }),
 )
+
+/**
+ * Additional storefront photos for an item (a gallery). The item's own
+ * `photoKey` stays the cover/thumbnail used by POS, the inventory list,
+ * and the catalog grid; these rows are *extra* images shown only on the
+ * public product detail page. Item-level — shared across all variants.
+ * Capped in the server function (a handful per item); 500 KB each, same
+ * S3 bucket as the cover photo.
+ */
+export const inventoryItemPhotos = pgTable(
+  'inventory_item_photos',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    itemId: uuid('item_id')
+      .references(() => inventoryItems.id, { onDelete: 'cascade' })
+      .notNull(),
+    photoKey: text('photo_key').notNull(),
+    /** Display order within the gallery (after the cover). Lower = first. */
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    itemIdx: index('inventory_item_photos_item_idx').on(t.itemId),
+  }),
+)

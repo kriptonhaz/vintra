@@ -897,7 +897,7 @@ function EditItemForm({
 
         <SellableToggle control={form.control} />
         <BookingFields control={form.control} />
-        <OnlineFields control={form.control} />
+        <OnlineFields control={form.control} itemId={item.id} />
         {linkSource === 'product' && (
           <PrepModeToggle control={form.control} />
         )}

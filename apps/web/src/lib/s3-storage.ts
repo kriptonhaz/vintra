@@ -302,6 +302,51 @@ export async function deleteInventoryPhoto(key: string): Promise<void> {
   )
 }
 
+export interface UploadInventoryGalleryPhotoParams {
+  tenantId: string
+  itemId: string
+  /** Unique id (the gallery row id) so each image gets its own object. */
+  photoId: string
+  bytes: Buffer
+  mimeType: string
+}
+
+/**
+ * Uploads an extra storefront gallery photo for an item. Key layout:
+ *   `{tenantId}/inventory/{itemId}/gallery/{photoId}.{ext}`
+ * Unlike the cover photo (one per item, overwritten in place), gallery
+ * images are keyed by a unique photoId so an item can hold several.
+ * Same 500 KB cap and `kind=inventory-item` lifecycle tag as the cover.
+ */
+export async function uploadInventoryGalleryPhoto(
+  params: UploadInventoryGalleryPhotoParams,
+): Promise<{ key: string }> {
+  if (params.bytes.byteLength > MAX_INVENTORY_PHOTO_BYTES) {
+    throw new Error(
+      `Ukuran foto melebihi batas (${MAX_INVENTORY_PHOTO_BYTES / 1024} KB).`,
+    )
+  }
+  const ext = params.mimeType.includes('png')
+    ? 'png'
+    : params.mimeType.includes('webp')
+      ? 'webp'
+      : 'jpg'
+  const key = `${params.tenantId}/inventory/${params.itemId}/gallery/${params.photoId}.${ext}`
+
+  await getClient().send(
+    new PutObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+      Body: params.bytes,
+      ContentType: params.mimeType,
+      CacheControl: 'private, max-age=31536000',
+      Tagging: 'kind=inventory-item',
+    }),
+  )
+
+  return { key }
+}
+
 // ─── HPP product photos ─────────────────────────────────────────────
 
 export const MAX_HPP_PRODUCT_PHOTO_BYTES = 500 * 1024

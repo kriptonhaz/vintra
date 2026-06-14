@@ -5,6 +5,7 @@ import {
   inventoryItems,
   inventoryItemUnits,
   inventoryItemUnitPricing,
+  inventoryItemPhotos,
   inventoryStockBalances,
   inventoryMovements,
   inventorySettings,
@@ -32,10 +33,12 @@ import {
 } from '../lib/branch-scope'
 import {
   uploadInventoryItemPhoto,
+  uploadInventoryGalleryPhoto,
   getInventoryPhotoSignedUrl,
   deleteInventoryPhoto,
   parseDataUrl,
 } from '@/lib/s3-storage'
+import { randomUUID } from 'node:crypto'
 
 /**
  * Recipe panel view types for the inventory item detail page (JUR-10).
@@ -1707,6 +1710,137 @@ export const getInventoryPhotoUrls = createServerFn({ method: 'POST' })
       }),
     )
     return Object.fromEntries(entries) as Record<string, string | null>
+  })
+
+// ─── Storefront photo gallery (extra images per item) ────────────────
+
+/** Max extra gallery photos per item (the cover photo is separate). */
+export const MAX_INVENTORY_GALLERY_PHOTOS = 6
+
+/**
+ * Lists the extra gallery photos for an item (admin edit form), each with
+ * a short-lived signed URL. The cover photo (`inventoryItems.photoKey`)
+ * is handled separately by the existing single-photo uploader.
+ */
+export const getInventoryItemPhotos = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ itemId: z.string().uuid() }))
+  .handler(async ({ data }) => {
+    const auth = await requireInventoryAccess()
+    const rows = await db
+      .select({
+        id: inventoryItemPhotos.id,
+        photoKey: inventoryItemPhotos.photoKey,
+        sortOrder: inventoryItemPhotos.sortOrder,
+      })
+      .from(inventoryItemPhotos)
+      .where(
+        and(
+          eq(inventoryItemPhotos.itemId, data.itemId),
+          eq(inventoryItemPhotos.tenantId, auth.tenantId),
+        ),
+      )
+      .orderBy(inventoryItemPhotos.sortOrder, inventoryItemPhotos.createdAt)
+
+    return Promise.all(
+      rows.map(async (r) => ({
+        id: r.id,
+        sortOrder: r.sortOrder,
+        url: await getInventoryPhotoSignedUrl(r.photoKey, 300).catch(() => null),
+      })),
+    )
+  })
+
+/**
+ * Adds one extra gallery photo to an item. Enforces the per-item cap and
+ * the 500 KB ceiling (via the S3 helper). New photo sorts last.
+ */
+export const addInventoryItemPhoto = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      itemId: z.string().uuid(),
+      photoDataUrl: z.string().min(1),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const auth = await requireInventoryAccess()
+
+    const [item] = await db
+      .select({ id: inventoryItems.id })
+      .from(inventoryItems)
+      .where(
+        and(
+          eq(inventoryItems.id, data.itemId),
+          eq(inventoryItems.tenantId, auth.tenantId),
+        ),
+      )
+      .limit(1)
+    if (!item) throw new Error('Item tidak ditemukan')
+
+    const existing = await db
+      .select({ sortOrder: inventoryItemPhotos.sortOrder })
+      .from(inventoryItemPhotos)
+      .where(eq(inventoryItemPhotos.itemId, data.itemId))
+    if (existing.length >= MAX_INVENTORY_GALLERY_PHOTOS) {
+      throw new Error(
+        `Maksimal ${MAX_INVENTORY_GALLERY_PHOTOS} foto tambahan per produk.`,
+      )
+    }
+    const nextSort =
+      existing.reduce((m, r) => Math.max(m, r.sortOrder), -1) + 1
+
+    const photoId = randomUUID()
+    const { bytes, mimeType } = parseDataUrl(data.photoDataUrl)
+    const { key } = await uploadInventoryGalleryPhoto({
+      tenantId: auth.tenantId,
+      itemId: data.itemId,
+      photoId,
+      bytes,
+      mimeType,
+    })
+
+    await db.insert(inventoryItemPhotos).values({
+      id: photoId,
+      tenantId: auth.tenantId,
+      itemId: data.itemId,
+      photoKey: key,
+      sortOrder: nextSort,
+    })
+
+    return {
+      id: photoId,
+      sortOrder: nextSort,
+      url: await getInventoryPhotoSignedUrl(key, 300).catch(() => null),
+    }
+  })
+
+/** Removes one extra gallery photo (S3 object + row). */
+export const removeInventoryItemGalleryPhoto = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ photoId: z.string().uuid() }))
+  .handler(async ({ data }) => {
+    const auth = await requireInventoryAccess()
+
+    const [row] = await db
+      .select({ photoKey: inventoryItemPhotos.photoKey })
+      .from(inventoryItemPhotos)
+      .where(
+        and(
+          eq(inventoryItemPhotos.id, data.photoId),
+          eq(inventoryItemPhotos.tenantId, auth.tenantId),
+        ),
+      )
+      .limit(1)
+    if (!row) throw new Error('Foto tidak ditemukan')
+
+    try {
+      await deleteInventoryPhoto(row.photoKey)
+    } catch {
+      // Swallow S3 error — DB delete below is the source of truth.
+    }
+    await db
+      .delete(inventoryItemPhotos)
+      .where(eq(inventoryItemPhotos.id, data.photoId))
+
+    return { ok: true }
   })
 
 // ─── HPP downlink: apply material price to linked inventory items ───
