@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ClipboardCheck, Search, RotateCcw } from 'lucide-react'
 import {
   getStockAdjustmentData,
@@ -44,6 +44,7 @@ const TYPE_LABEL: Record<string, string> = {
 function AdjustPage() {
   const initial = Route.useLoaderData()
   const router = useRouter()
+  const queryClient = useQueryClient()
   const { toast } = useToast()
 
   // Branch comes from the global topbar switcher — single source of truth.
@@ -152,6 +153,12 @@ function AdjustPage() {
         variant: 'success',
       })
       setDrafts({})
+      // The items list + cashier read stock via React Query (not route
+      // loaders), so router.invalidate() alone leaves them stale until a
+      // manual refresh. Invalidate those caches explicitly too.
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'items'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-adjust'] })
+      queryClient.invalidateQueries({ queryKey: ['pos'] })
       await router.invalidate()
     } catch (err) {
       toast({
