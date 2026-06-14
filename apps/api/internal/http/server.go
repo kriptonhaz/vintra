@@ -155,6 +155,12 @@ func NewServer(deps Deps) *fiber.App {
 	ragPreview := handlers.NewRagPreview(deps.Queries, deps.DBPool)
 	v1.Post("/internal/rag/preview", internalMW, ragPreview.Preview)
 
+	// Storefront checkout → admin WhatsApp notification. The web's
+	// unauthenticated placeOrder calls this with the tenant + instance
+	// id; recipient is the instance's own admin_phone (no arbitrary to).
+	waNotify := handlers.NewWaInternalNotify(deps.Queries, deps.AsynqClient)
+	v1.Post("/internal/wa/notify", internalMW, waNotify.Send)
+
 	// System metrics for the web's /admin/monitoring page. The web
 	// fetches this so its monitoring view always reflects the api's
 	// host (= prod Lightsail) even when the operator is viewing from

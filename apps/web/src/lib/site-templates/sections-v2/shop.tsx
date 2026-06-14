@@ -20,8 +20,18 @@ import {
   getStorefront,
   validateStorefrontPromo,
   placeOrder,
+  trackOrder,
 } from '@/server/functions/storefront'
 import type { SectionDef, SectionRenderProps } from '../v2-types'
+
+const TRACK_STATUS_LABEL: Record<string, string> = {
+  pending: 'Menunggu pembayaran',
+  confirmed: 'Pembayaran dikonfirmasi',
+  ready: 'Siap diambil',
+  shipped: 'Sedang dikirim',
+  completed: 'Selesai',
+  cancelled: 'Dibatalkan',
+}
 
 const PAYMENT_LABEL: Record<string, string> = {
   cash: 'Tunai (bayar di tempat)',
@@ -48,6 +58,7 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
   })
 
   const cart = useCart(slug ?? '')
+  const [trackOpen, setTrackOpen] = useState(false)
 
   // Live site hides the whole section when the store is off; the editor
   // preview still shows the catalog (with a hint) so layout is visible.
@@ -72,6 +83,16 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
             <p className="mt-2 text-xs italic text-amber-600">
               Toko online belum aktif — aktifkan di Situs → Toko Online.
             </p>
+          )}
+          {!isEditorPreview && store?.enabled && (
+            <button
+              type="button"
+              onClick={() => setTrackOpen(true)}
+              className="mt-3 text-sm font-medium underline"
+              style={{ color: theme.brandColor }}
+            >
+              Lacak pesanan
+            </button>
           )}
         </div>
 
@@ -163,7 +184,150 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
       {!isEditorPreview && store?.enabled && (
         <CartWidget slug={slug} store={store} brandColor={theme.brandColor} />
       )}
+      {trackOpen && (
+        <TrackModal
+          slug={slug}
+          brandColor={theme.brandColor}
+          onClose={() => setTrackOpen(false)}
+        />
+      )}
     </section>
+  )
+}
+
+// ─── Track-order modal (lookup by order number + phone) ────────────
+
+function TrackModal({
+  slug,
+  brandColor,
+  onClose,
+}: {
+  slug: string
+  brandColor: string
+  onClose: () => void
+}) {
+  const [orderNumber, setOrderNumber] = useState('')
+  const [phone, setPhone] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<
+    Awaited<ReturnType<typeof trackOrder>> | null
+  >(null)
+
+  async function lookup() {
+    if (!orderNumber.trim() || !phone.trim()) return
+    setLoading(true)
+    setResult(null)
+    try {
+      setResult(
+        await trackOrder({
+          data: { slug, orderNumber: orderNumber.trim(), phone: phone.trim() },
+        }),
+      )
+    } catch {
+      setResult({ found: false })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const inputCls =
+    'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800'
+
+  return (
+    <div className="fixed inset-0 z-[960] flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="fixed inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-gray-900">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+            Lacak Pesanan
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Tutup"
+            className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <input
+            value={orderNumber}
+            onChange={(e) => setOrderNumber(e.target.value)}
+            placeholder="No. pesanan (ORD-…)"
+            className={inputCls}
+          />
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Nomor WhatsApp"
+            className={inputCls}
+          />
+          <button
+            type="button"
+            onClick={lookup}
+            disabled={loading || !orderNumber.trim() || !phone.trim()}
+            className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            style={{ backgroundColor: brandColor }}
+          >
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            Cek status
+          </button>
+        </div>
+
+        {result && (
+          <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
+            {!result.found ? (
+              <p className="text-center text-sm text-gray-500">
+                Pesanan tidak ditemukan. Periksa nomor pesanan & WhatsApp.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">
+                    {result.orderNumber}
+                  </span>
+                  <span
+                    className="rounded-full px-2.5 py-0.5 text-xs font-medium text-white"
+                    style={{ backgroundColor: brandColor }}
+                  >
+                    {TRACK_STATUS_LABEL[result.status] ?? result.status}
+                  </span>
+                </div>
+                <ul className="space-y-1 text-sm">
+                  {result.items.map((i, idx) => (
+                    <li key={idx} className="flex justify-between">
+                      <span className="text-gray-700 dark:text-gray-300">
+                        {i.name} ×{i.qty}
+                      </span>
+                      <span className="tabular-nums">{formatRupiah(i.subtotal)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex justify-between border-t border-gray-100 pt-2 text-sm font-bold dark:border-gray-800">
+                  <span>Total</span>
+                  <span className="tabular-nums">{formatRupiah(result.total)}</span>
+                </div>
+                {result.trackingNumber && (
+                  <p className="rounded-lg bg-gray-50 p-2 text-sm dark:bg-gray-800">
+                    {result.courierName ? `${result.courierName} — ` : ''}Resi:{' '}
+                    <span className="font-medium tabular-nums">
+                      {result.trackingNumber}
+                    </span>
+                  </p>
+                )}
+                {result.status === 'cancelled' && result.cancelReason && (
+                  <p className="text-xs italic text-gray-500">
+                    Alasan: {result.cancelReason}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

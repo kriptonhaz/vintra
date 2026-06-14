@@ -131,6 +131,46 @@ async function availableByItem(
   return out
 }
 
+/**
+ * Best-effort admin notification via the Go API's internal endpoint
+ * (authed with INTERNAL_SERVICE_TOKEN). Swallows every error — the
+ * storefront's wa.me deep link is the guaranteed fallback. Stamps
+ * `wa_notified_at` on success. No-op when the token / API URL is unset.
+ */
+async function notifyAdminOfOrder(params: {
+  tenantId: string
+  instanceId: string
+  orderId: string
+  body: string
+}): Promise<void> {
+  const apiBase = process.env.API_URL
+  const token = process.env.INTERNAL_SERVICE_TOKEN
+  if (!apiBase || !token) return
+  try {
+    const res = await fetch(`${apiBase}/v1/internal/wa/notify`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        tenantId: params.tenantId,
+        instanceId: params.instanceId,
+        body: params.body,
+      }),
+      signal: AbortSignal.timeout(5000),
+    })
+    if (res.ok) {
+      await db
+        .update(onlineOrders)
+        .set({ waNotifiedAt: new Date() })
+        .where(eq(onlineOrders.id, params.orderId))
+    }
+  } catch {
+    // Never let a notification failure affect order placement.
+  }
+}
+
 // ─── getStorefront ─────────────────────────────────────────────────
 
 export const getStorefront = createServerFn()
@@ -318,6 +358,78 @@ async function findActiveCodePromo(tenantId: string, code: string) {
     .limit(1)
   return promo ?? null
 }
+
+// ─── trackOrder ────────────────────────────────────────────────────
+
+export const trackOrder = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      slug: z.string(),
+      orderNumber: z.string().min(1).max(40),
+      phone: z.string().min(4).max(25),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const tenant = await resolveTenant(data.slug)
+    if (!tenant) return { found: false as const }
+    const phone = normalizePhone(data.phone)
+    if (!phone) return { found: false as const }
+
+    const [order] = await db
+      .select({
+        orderNumber: onlineOrders.orderNumber,
+        status: onlineOrders.status,
+        fulfillmentType: onlineOrders.fulfillmentType,
+        total: onlineOrders.total,
+        paymentMethod: onlineOrders.paymentMethod,
+        courierName: onlineOrders.courierName,
+        trackingNumber: onlineOrders.trackingNumber,
+        createdAt: onlineOrders.createdAt,
+        cancelReason: onlineOrders.cancelReason,
+      })
+      .from(onlineOrders)
+      .where(
+        and(
+          eq(onlineOrders.tenantId, tenant.id),
+          sql`upper(${onlineOrders.orderNumber}) = upper(${data.orderNumber.trim()})`,
+          eq(onlineOrders.customerPhone, phone),
+        ),
+      )
+      .limit(1)
+    if (!order) return { found: false as const }
+
+    const items = await db
+      .select({
+        nameSnapshot: onlineOrderItems.nameSnapshot,
+        qty: onlineOrderItems.qty,
+        subtotal: onlineOrderItems.subtotal,
+      })
+      .from(onlineOrderItems)
+      .innerJoin(onlineOrders, eq(onlineOrders.id, onlineOrderItems.orderId))
+      .where(
+        and(
+          eq(onlineOrders.tenantId, tenant.id),
+          eq(onlineOrders.orderNumber, order.orderNumber),
+        ),
+      )
+
+    return {
+      found: true as const,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      fulfillmentType: order.fulfillmentType,
+      total: Number(order.total),
+      paymentMethod: order.paymentMethod,
+      courierName: order.courierName,
+      trackingNumber: order.trackingNumber,
+      cancelReason: order.cancelReason,
+      items: items.map((i) => ({
+        name: i.nameSnapshot,
+        qty: Number(i.qty),
+        subtotal: Number(i.subtotal),
+      })),
+    }
+  })
 
 /** Atomic per-tenant order number: ORD-YYYY-00001. Mirrors nextSaleNumber. */
 async function nextOrderNumber(
@@ -532,7 +644,7 @@ export const placeOrder = createServerFn({ method: 'POST' })
       }
     }
 
-    const orderNumber = await db.transaction(async (tx) => {
+    const { orderNumber, orderId } = await db.transaction(async (tx) => {
       const num = await nextOrderNumber(tx as unknown as typeof db, tenant.id, now)
       const [order] = await tx
         .insert(onlineOrders)
@@ -584,7 +696,7 @@ export const placeOrder = createServerFn({ method: 'POST' })
           hppAtSale: li.hppAtSale.toString(),
         })),
       )
-      return num
+      return { orderNumber: num, orderId: order.id }
     })
 
     // Payment instructions snapshot for the confirmation screen.
@@ -607,6 +719,23 @@ export const placeOrder = createServerFn({ method: 'POST' })
         `Total Rp ${total.toLocaleString('id-ID')} via ${data.paymentMethod}. ` +
         `Atas nama ${data.customerName}.`
       waLink = `https://wa.me/${settings.waConfirmPhone}?text=${encodeURIComponent(msg)}`
+    }
+
+    // Integrated path (best-effort): auto-notify the admin via the
+    // tenant's connected WhatsApp. Never blocks/fails the order — the
+    // wa.me deep link above is the guaranteed fallback.
+    if (settings.adminNotifyInstanceId) {
+      void notifyAdminOfOrder({
+        tenantId: tenant.id,
+        instanceId: settings.adminNotifyInstanceId,
+        orderId,
+        body:
+          `🛍️ *Pesanan baru ${orderNumber}*\n` +
+          `${data.customerName} (${phone ?? data.customerPhone})\n` +
+          `${lineItems.length} item • Total Rp ${total.toLocaleString('id-ID')}\n` +
+          `Bayar: ${data.paymentMethod} • ${data.fulfillmentType === 'pickup' ? 'Ambil di tempat' : 'Dikirim'}\n` +
+          `Buka Vintra untuk konfirmasi.`,
+      })
     }
 
     return {
