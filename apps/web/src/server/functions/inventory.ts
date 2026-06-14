@@ -1382,7 +1382,15 @@ export const updateInventoryItem = createServerFn({ method: 'POST' })
           updates.minStockLevel != null
             ? updates.minStockLevel.toString()
             : null,
-        photoKey: updates.photoKey ?? null,
+        // Photo is managed by uploadInventoryItemPhotoFn /
+        // removeInventoryItemPhoto, which the edit form only calls when
+        // the user actually touches it. The form never sends photoKey
+        // here, so writing `updates.photoKey ?? null` unconditionally
+        // would wipe an existing photo on every metadata edit. Only
+        // touch photoKey when it's explicitly provided.
+        ...(updates.photoKey !== undefined
+          ? { photoKey: updates.photoKey }
+          : {}),
         notes: updates.notes ?? null,
         linkedHppMaterialId: updates.linkedHppMaterialId ?? null,
         linkedHppProductId: updates.linkedHppProductId ?? null,
