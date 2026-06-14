@@ -548,8 +548,8 @@ function MembersPage() {
           waLoginAvailable={waLoginAvailable}
           showHrSection={attendanceManageable}
           onClose={() => setShowInvite(false)}
-          onInvited={async () => {
-            setShowInvite(false)
+          onInvited={async (opts) => {
+            if (!opts?.keepOpen) setShowInvite(false)
             await router.invalidate()
           }}
         />
@@ -770,10 +770,15 @@ function InviteSheet({
   waLoginAvailable: boolean
   showHrSection: boolean
   onClose: () => void
-  onInvited: () => void | Promise<void>
+  onInvited: (opts?: { keepOpen?: boolean }) => void | Promise<void>
 }) {
   const { t } = useTranslation()
   const [serverError, setServerError] = useState<string | null>(null)
+  // Set after a successful email invite — the Supabase activation link.
+  // We show it so the owner can forward it manually as a fallback to the
+  // (also-sent) email invitation.
+  const [inviteLink, setInviteLink] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null)
   // Once the member row is created we keep its id so a retry (e.g. the
   // HR upsert failed on a quota error) doesn't re-invite the member.
@@ -832,6 +837,7 @@ function InviteSheet({
           : { mode: 'specific' as const, branchIds: values.branchIds }
 
       let memberId = createdMemberId
+      let capturedLink: string | null = null
       if (!memberId) {
         if (values.inviteMode === 'phone-only') {
           // Phone-only path: server generates synthetic Supabase email,
@@ -863,6 +869,7 @@ function InviteSheet({
             },
           })
           memberId = member.id
+          capturedLink = member.inviteLink ?? null
         }
         setCreatedMemberId(memberId)
       }
@@ -884,10 +891,71 @@ function InviteSheet({
           },
         })
       }
-      await onInvited()
+      if (capturedLink) {
+        // Keep the sheet open to show the activation link; still refresh
+        // the member list underneath.
+        setInviteLink(capturedLink)
+        await onInvited({ keepOpen: true })
+      } else {
+        await onInvited()
+      }
     } catch (err) {
       setServerError(err instanceof Error ? err.message : t('members.inviteError'))
     }
+  }
+
+  // Success view — after an email invite, show the activation link the
+  // owner can forward (the invite email is also sent automatically).
+  if (inviteLink) {
+    return (
+      <Sheet open={true} onClose={onClose}>
+        <SheetHeader onClose={onClose}>
+          <SheetTitle>Anggota ditambahkan</SheetTitle>
+          <SheetDescription>
+            Undangan sudah dikirim ke email anggota. Kamu juga bisa kirim
+            link aktivasi di bawah ini secara manual (mis. lewat WhatsApp).
+          </SheetDescription>
+        </SheetHeader>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 space-y-3 overflow-y-auto px-6 py-5">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Link aktivasi
+            </label>
+            <textarea
+              readOnly
+              value={inviteLink}
+              rows={3}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full break-all rounded-lg border border-gray-300 px-3 py-2 text-xs dark:border-gray-600 dark:bg-gray-800"
+            />
+            <p className="text-xs text-gray-500">
+              Link berlaku 24 jam. Anggota klik link → buat password → bisa
+              langsung login.
+            </p>
+          </div>
+          <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-6 py-4 dark:border-gray-700">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(inviteLink)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                } catch {
+                  /* clipboard blocked — owner can select the text */
+                }
+              }}
+            >
+              {copied ? 'Tersalin!' : 'Salin link'}
+            </Button>
+            <Button type="button" variant="brand" onClick={onClose}>
+              Selesai
+            </Button>
+          </div>
+        </div>
+      </Sheet>
+    )
   }
 
   return (

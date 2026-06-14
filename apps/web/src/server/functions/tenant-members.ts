@@ -24,6 +24,7 @@ import {
   deleteTenantMemberPhoto,
   parseDataUrl,
 } from '@/lib/s3-storage'
+import { buildMemberInviteEmail, sendEmail } from '../email'
 
 function getSupabaseServer() {
   return createClient(
@@ -304,14 +305,71 @@ export const inviteTenantMember = createServerFn({ method: 'POST' })
 
     const supabase = getSupabaseServer()
     let user = await findUserByEmail(data.email)
+    // The shareable activation link, returned to the owner so they can
+    // forward it manually (e.g. via WhatsApp) even if email delivery is
+    // delayed. Null when the user already existed (no link needed).
+    let inviteLink: string | null = null
 
     if (!user) {
-      const { data: invited, error: inviteErr } =
-        await supabase.auth.admin.inviteUserByEmail(data.email)
-      if (inviteErr || !invited.user) {
-        throw new Error(inviteErr?.message ?? 'Gagal mengundang pengguna')
+      // Supabase's hosted SMTP is rate-limited in this project, so the
+      // old `inviteUserByEmail` path failed opaquely (surfaced as an
+      // empty "{}" error). Mirror registerWithEmail/sendPasswordResetEmail:
+      // generate the action link ourselves (Supabase sends NO email) and
+      // deliver it via our Brevo pipeline.
+      const appUrl = process.env.VITE_APP_URL ?? 'http://localhost:3000'
+      const fullName =
+        [data.firstName, data.lastName].filter(Boolean).join(' ').trim() ||
+        data.email
+
+      const { data: linkData, error: linkErr } =
+        await supabase.auth.admin.generateLink({
+          type: 'invite',
+          email: data.email,
+          options: {
+            data: { full_name: fullName },
+            // Invite links establish a session; land them on the
+            // set-password page (NOT /auth/callback, which would try to
+            // provision a brand-new tenant for them).
+            redirectTo: `${appUrl}/auth/reset-password`,
+          },
+        })
+      if (linkErr || !linkData.user || !linkData.properties?.action_link) {
+        // `||` (not `??`) so an empty-string message also falls back;
+        // include the code so failures are diagnosable instead of "{}".
+        throw new Error(
+          linkErr?.message ||
+            (linkErr as { code?: string } | null)?.code ||
+            'Gagal membuat undangan',
+        )
       }
-      user = invited.user
+      user = linkData.user
+      inviteLink = linkData.properties.action_link
+
+      // Deliver the invite via Brevo. Best-effort: a send failure does
+      // NOT abort — the account exists and `inviteLink` is returned so
+      // the owner can share it directly.
+      const [tenantRow] = await db
+        .select({ businessName: tenants.businessName })
+        .from(tenants)
+        .where(eq(tenants.id, auth.tenantId))
+        .limit(1)
+      const tpl = buildMemberInviteEmail({
+        fullName,
+        businessName: tenantRow?.businessName ?? 'Vintra',
+        actionLink: inviteLink,
+      })
+      try {
+        await sendEmail({
+          to: data.email,
+          toName: fullName,
+          subject: tpl.subject,
+          htmlContent: tpl.htmlContent,
+          textContent: tpl.textContent,
+          tag: 'member-invite',
+        })
+      } catch (err) {
+        console.error('[inviteTenantMember] invite email send failed:', err)
+      }
     }
 
     const existing = await db
@@ -380,6 +438,7 @@ export const inviteTenantMember = createServerFn({ method: 'POST' })
       photoKey,
       email: user.email ?? null,
       roleLabel: role.label,
+      inviteLink,
     }
   })
 

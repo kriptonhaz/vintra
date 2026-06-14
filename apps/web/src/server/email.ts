@@ -287,6 +287,56 @@ export function buildSignupVerificationEmail(input: SignupVerificationInput): {
   return { subject, htmlContent, textContent }
 }
 
+interface MemberInviteEmailInput {
+  /** Invitee display name. */
+  fullName: string
+  /** Tenant / business name they're being invited into. */
+  businessName: string
+  /** The Supabase action_link from `auth.admin.generateLink({type:'invite'})`. */
+  actionLink: string
+}
+
+/**
+ * Team-member invite message. Same rationale as the other auth emails:
+ * route through Brevo, not Supabase's rate-limited hosted SMTP. The
+ * invite action_link is issued by Supabase (carries the one-time token);
+ * clicking it lands the invitee on /auth/reset-password to set their
+ * password, after which they can log in as a member of the tenant.
+ */
+export function buildMemberInviteEmail(input: MemberInviteEmailInput): {
+  subject: string
+  htmlContent: string
+  textContent: string
+} {
+  const subject = `Undangan bergabung ke ${input.businessName} di Vintra`
+
+  const intro = `Halo ${escape(input.fullName)}, Anda diundang untuk bergabung sebagai anggota tim ${escape(input.businessName)} di Vintra. Klik tombol di bawah untuk mengaktifkan akun dan membuat password Anda.`
+
+  const htmlContent = renderShell({
+    title: 'Anda diundang ke Vintra',
+    intro,
+    tableHtml: '',
+    amountLine: '',
+    ctaLabel: 'Aktifkan Akun',
+    ctaUrl: input.actionLink,
+    footerNote:
+      'Link undangan ini akan kedaluwarsa dalam 24 jam. Jika Anda tidak mengenal undangan ini, abaikan email ini.',
+  })
+
+  const textContent = [
+    `Halo ${input.fullName},`,
+    '',
+    `Anda diundang untuk bergabung ke ${input.businessName} di Vintra.`,
+    '',
+    'Klik link berikut untuk mengaktifkan akun dan membuat password:',
+    input.actionLink,
+    '',
+    'Link ini akan kedaluwarsa dalam 24 jam.',
+  ].join('\n')
+
+  return { subject, htmlContent, textContent }
+}
+
 interface PasswordResetEmailInput {
   /** The Supabase action_link from `auth.admin.generateLink({type:'recovery'})`. */
   actionLink: string
