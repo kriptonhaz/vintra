@@ -79,6 +79,30 @@ function POSSettingsPage() {
   const [methods, setMethods] = React.useState<POSPaymentMethod[]>(
     (data.settings?.defaultPaymentMethods ?? ['cash', 'qris']) as POSPaymentMethod[],
   )
+
+  // Bank accounts surfaced when paying via Transfer Bank. Whole array
+  // is replaced on save, mirroring the tax stack above.
+  type BankRow = {
+    bankName: string
+    accountNumber: string
+    accountHolder: string
+    active: boolean
+  }
+  const [banks, setBanks] = React.useState<BankRow[]>(
+    () => (data.settings?.bankAccounts ?? []) as BankRow[],
+  )
+  function addBankRow() {
+    setBanks((prev) => [
+      ...prev,
+      { bankName: '', accountNumber: '', accountHolder: '', active: true },
+    ])
+  }
+  function updateBankRow(idx: number, patch: Partial<BankRow>) {
+    setBanks((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+  }
+  function removeBankRow(idx: number) {
+    setBanks((prev) => prev.filter((_, i) => i !== idx))
+  }
   const save = useMutation({
     mutationFn: () =>
       updatePOSSettings({
@@ -90,6 +114,15 @@ function POSSettingsPage() {
           // Footer + logo no longer ride on the main save — they have
           // per-branch overrides handled inside <ReceiptScopeSection>.
           defaultPaymentMethods: methods,
+          // Drop rows the user left entirely blank so the array stays
+          // clean; a row with any field filled is kept and validated
+          // server-side (all three fields required).
+          bankAccounts: banks.filter(
+            (b) =>
+              b.bankName.trim() ||
+              b.accountNumber.trim() ||
+              b.accountHolder.trim(),
+          ),
         },
       }),
     onSuccess: () => {
@@ -255,6 +288,87 @@ function POSSettingsPage() {
           </div>
         </Section>
       </div>
+
+      {methods.includes('transfer') && (
+        <Section title="Rekening Bank">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Rekening yang ditampilkan saat pelanggan memilih Transfer Bank.
+            Bisa lebih dari satu — nonaktifkan baris untuk menyembunyikannya
+            tanpa menghapus.
+          </p>
+          <div className="mt-3 space-y-2">
+            {banks.length === 0 && (
+              <p className="rounded-md border border-dashed border-gray-300 p-3 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                Belum ada rekening. Klik "Tambah rekening" untuk mulai.
+              </p>
+            )}
+            {banks.map((row, idx) => (
+              <div
+                key={idx}
+                className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 dark:border-gray-700"
+              >
+                <div className="flex shrink-0 items-center pt-9">
+                  <input
+                    type="checkbox"
+                    checked={row.active}
+                    onChange={(e) =>
+                      updateBankRow(idx, { active: e.target.checked })
+                    }
+                    aria-label="Aktifkan rekening"
+                    className="rounded border-gray-300"
+                  />
+                </div>
+                <div className="grid flex-1 gap-2 sm:grid-cols-3">
+                  <Input
+                    label="Bank"
+                    value={row.bankName}
+                    onChange={(e) =>
+                      updateBankRow(idx, { bankName: e.target.value })
+                    }
+                    placeholder="cth. BCA"
+                    disabled={!row.active}
+                  />
+                  <Input
+                    label="No. Rekening"
+                    value={row.accountNumber}
+                    onChange={(e) =>
+                      updateBankRow(idx, { accountNumber: e.target.value })
+                    }
+                    placeholder="cth. 1234567890"
+                    className="tabular-nums"
+                    disabled={!row.active}
+                  />
+                  <Input
+                    label="Atas Nama"
+                    value={row.accountHolder}
+                    onChange={(e) =>
+                      updateBankRow(idx, { accountHolder: e.target.value })
+                    }
+                    placeholder="cth. PT Toko Maju Jaya"
+                    disabled={!row.active}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeBankRow(idx)}
+                  className="mt-7 shrink-0 rounded-md p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                  aria-label="Hapus rekening"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={addBankRow}
+              className="w-full"
+            >
+              <Plus className="mr-1 h-4 w-4" /> Tambah rekening
+            </Button>
+          </div>
+        </Section>
+      )}
 
       {data.tier === 'komplit' && (
         <CashDrawerSection

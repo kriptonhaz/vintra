@@ -132,6 +132,28 @@ export const posSettings = pgTable(
       .notNull()
       .default(sql`ARRAY['cash', 'qris']::text[]`),
     /**
+     * Bank accounts shown when the customer pays via Transfer Bank
+     * (Toko+ feature, since `transfer` itself unlocks at Toko). Whole
+     * array is replaced on each settings save — same edit model as
+     * `taxes`. Inactive rows stay configured but aren't surfaced to
+     * the cashier. Empty array = tenant hasn't added any yet.
+     *
+     * Example:
+     *   [{bankName:'BCA', accountNumber:'1234567890',
+     *     accountHolder:'PT Toko Maju Jaya', active:true}]
+     */
+    bankAccounts: jsonb('bank_accounts')
+      .$type<
+        Array<{
+          bankName: string
+          accountNumber: string
+          accountHolder: string
+          active: boolean
+        }>
+      >()
+      .notNull()
+      .default([]),
+    /**
      * Loyalty config (Komplit-tier `loyalty_points` feature). Stored
      * even when disabled so the values stick across enable/disable
      * toggles.

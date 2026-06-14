@@ -3692,6 +3692,28 @@ const updateSettingsInput = z.object({
     .array(z.enum(['cash', 'qris', 'transfer', 'card', 'ewallet', 'gopay', 'shopeepay', 'ovo']))
     .min(1)
     .optional(),
+  /**
+   * Bank accounts surfaced when paying via Transfer Bank. Whole array
+   * is replaced on each save (same model as `taxes`). Empty array is
+   * valid and means "no accounts configured". 10 rows is plenty.
+   */
+  bankAccounts: z
+    .array(
+      z.object({
+        bankName: z.string().min(1, 'Nama bank wajib diisi').max(40),
+        accountNumber: z
+          .string()
+          .min(1, 'Nomor rekening wajib diisi')
+          .max(40),
+        accountHolder: z
+          .string()
+          .min(1, 'Nama pemilik rekening wajib diisi')
+          .max(80),
+        active: z.boolean(),
+      }),
+    )
+    .max(10)
+    .optional(),
   /** Loyalty config (Komplit feature). All optional so the settings
    *  page can save just the fields it owns. */
   loyaltyEnabled: z.boolean().optional(),
@@ -3748,6 +3770,8 @@ export const updatePOSSettings = createServerFn({ method: 'POST' })
     if (data.receiptFooterText !== undefined) updateSet.receiptFooterText = data.receiptFooterText
     if (data.defaultPaymentMethods !== undefined)
       updateSet.defaultPaymentMethods = data.defaultPaymentMethods
+    if (data.bankAccounts !== undefined)
+      updateSet.bankAccounts = data.bankAccounts
     if (data.loyaltyEnabled !== undefined)
       updateSet.loyaltyEnabled = data.loyaltyEnabled
     if (data.loyaltyEarnMode !== undefined)

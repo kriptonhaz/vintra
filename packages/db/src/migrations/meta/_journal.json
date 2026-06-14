@@ -890,6 +890,13 @@
       "when": 1781170263774,
       "tag": "0126_reposition_ai_prompt_templates",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1786017600000,
+      "tag": "0127_pos_bank_accounts",
+      "breakpoints": true
     }
   ]
 }
