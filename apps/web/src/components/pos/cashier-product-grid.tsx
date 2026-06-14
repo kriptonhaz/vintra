@@ -55,6 +55,21 @@ export interface POSProduct {
   isFavorite?: boolean
   /** Every priced unit. Always at least 1; the cashier picks one when adding. */
   units: POSProductUnit[]
+  /** True when the item is sold as one of its variants (Phase 3). */
+  hasVariants?: boolean
+  /** Variant combinations with per-branch stock + price. */
+  variants?: POSVariant[]
+}
+
+export interface POSVariant {
+  id: string
+  value1: string
+  value2: string
+  label: string
+  sku: string | null
+  price: number
+  /** Variant stock at this branch, in base units. */
+  stockInBase: number
 }
 
 interface Props {
@@ -252,6 +267,17 @@ function ProductCard({
   const displayPrice = displayUnitTier?.unitPrice ?? 0
   const displayPriceUnit = displayUnit?.unitLabel ?? ''
 
+  // Variant items price from their cheapest combo ("mulai Rp …") since
+  // they carry no unit tiers; tapping opens the variant picker.
+  const isVariant = Boolean(
+    product.hasVariants && product.variants && product.variants.length > 0,
+  )
+  const variantPrices = isVariant
+    ? product.variants!.map((v) => v.price).filter((p) => p > 0)
+    : []
+  const variantMinPrice =
+    variantPrices.length > 0 ? Math.min(...variantPrices) : 0
+
   // JUR-15: prep-mode siap counter in the display unit. siapInBase is
   // null for non-prep items and 0+ for prep items. Tile hard-disables
   // when prep-mode AND siap = 0 (matches "Stok prep habis" sale-time
@@ -307,12 +333,18 @@ function ProductCard({
         <p className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-gray-100">
           {product.name}
         </p>
-        <p className="mt-1 text-sm font-semibold text-brand-700 dark:text-brand-300">
-          {formatRupiah(displayPrice)}
-          <span className="ml-0.5 text-xs font-normal text-gray-500">
-            / {displayPriceUnit}
-          </span>
-        </p>
+        {isVariant ? (
+          <p className="mt-1 text-sm font-semibold text-brand-700 dark:text-brand-300">
+            mulai {formatRupiah(variantMinPrice)}
+          </p>
+        ) : (
+          <p className="mt-1 text-sm font-semibold text-brand-700 dark:text-brand-300">
+            {formatRupiah(displayPrice)}
+            <span className="ml-0.5 text-xs font-normal text-gray-500">
+              / {displayPriceUnit}
+            </span>
+          </p>
+        )}
         <div className="mt-1.5 flex items-center justify-between">
           {isPrepMode ? (
             <span className="text-xs text-gray-500">

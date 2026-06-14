@@ -448,6 +448,15 @@ export const posSaleItems = pgTable(
       .notNull(),
     /** Null for ad-hoc lines. When set, sale insert also creates an inventory_movements row. */
     itemId: uuid('item_id').references(() => inventoryItems.id),
+    /**
+     * Chosen variant when the item has variants. FK column only (no
+     * Drizzle reference — avoids a cross-file cycle); the constraint is
+     * added in the migration. Variant lines deduct
+     * inventory_item_variant_stock instead of item-level stock.
+     */
+    variantId: uuid('variant_id'),
+    /** Variant label snapshot, e.g. "M / Merah". Null for plain items. */
+    variantLabel: text('variant_label'),
     nameSnapshot: text('name_snapshot').notNull(),
     skuSnapshot: text('sku_snapshot'),
     /**

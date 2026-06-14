@@ -20,6 +20,8 @@ import {
   inventoryItemUnitPricing,
   inventoryItemPrepBatches,
   inventoryStockBalances,
+  inventoryItemVariants,
+  inventoryItemVariantStock,
   inventoryMovements,
   branches,
   branchSchedules,
@@ -688,6 +690,7 @@ export const listPOSProducts = createServerFn({ method: 'POST' })
         linkedHppProductId: inventoryItems.linkedHppProductId,
         prepMode: inventoryItems.prepMode,
         isFavorite: inventoryItems.isFavorite,
+        hasVariants: inventoryItems.hasVariants,
       })
       .from(inventoryItems)
       .innerJoin(masterHppUnits, eq(masterHppUnits.id, inventoryItems.baseUnitId))
@@ -807,12 +810,83 @@ export const listPOSProducts = createServerFn({ method: 'POST' })
       unitsByItem.set(u.itemId, arr)
     }
 
-    // Build the final list. Items with no priced units are filtered out
-    // — they shouldn't appear in the cashier grid yet.
+    // Variants for variant items, with per-branch stock at the cashier's
+    // branch. Variant items price + stock come from here (not the unit
+    // tiers), so they appear in the grid even without priced units.
+    const variantItemIds = itemRows.filter((r) => r.hasVariants).map((r) => r.id)
+    const variantsByItem = new Map<
+      string,
+      Array<{
+        id: string
+        value1: string
+        value2: string
+        label: string
+        sku: string | null
+        price: number
+        stockInBase: number
+      }>
+    >()
+    if (variantItemIds.length > 0) {
+      const vRows = await db
+        .select({
+          id: inventoryItemVariants.id,
+          itemId: inventoryItemVariants.itemId,
+          value1: inventoryItemVariants.value1,
+          value2: inventoryItemVariants.value2,
+          sku: inventoryItemVariants.sku,
+          price: inventoryItemVariants.price,
+          sortOrder: inventoryItemVariants.sortOrder,
+          stock: inventoryItemVariantStock.quantity,
+        })
+        .from(inventoryItemVariants)
+        .leftJoin(
+          inventoryItemVariantStock,
+          and(
+            eq(inventoryItemVariantStock.variantId, inventoryItemVariants.id),
+            eq(inventoryItemVariantStock.branchId, data.branchId),
+          ),
+        )
+        .where(
+          and(
+            inArray(inventoryItemVariants.itemId, variantItemIds),
+            eq(inventoryItemVariants.isActive, true),
+          ),
+        )
+        .orderBy(inventoryItemVariants.sortOrder)
+      for (const v of vRows) {
+        const arr = variantsByItem.get(v.itemId) ?? []
+        arr.push({
+          id: v.id,
+          value1: v.value1,
+          value2: v.value2,
+          label: v.value2 ? `${v.value1} / ${v.value2}` : v.value1,
+          sku: v.sku,
+          price: Number(v.price),
+          stockInBase: Number(v.stock ?? 0),
+        })
+        variantsByItem.set(v.itemId, arr)
+      }
+    }
+
+    // Build the final list. Non-variant items with no priced units are
+    // filtered out; variant items always pass (they carry their own
+    // price + stock per combo) with a synthesized base unit.
     const items = itemRows
       .map((r) => {
-        const units = unitsByItem.get(r.id) ?? []
-        if (units.length === 0) return null
+        const isVariant = r.hasVariants
+        const variants = isVariant ? (variantsByItem.get(r.id) ?? []) : []
+        const units = isVariant
+          ? [
+              {
+                unitId: r.baseUnitId,
+                unitLabel: r.baseUnitLabel,
+                ratioToBase: 1,
+                isDefault: true,
+                tiers: [] as Array<{ minQty: number; unitPrice: number }>,
+              },
+            ]
+          : (unitsByItem.get(r.id) ?? [])
+        if (!isVariant && units.length === 0) return null
         return {
           id: r.id,
           name: r.name,
@@ -821,7 +895,11 @@ export const listPOSProducts = createServerFn({ method: 'POST' })
           baseUnitLabel: r.baseUnitLabel,
           photoKey: r.photoKey,
           categoryId: r.categoryId,
-          stockInBase: Number(r.balance ?? 0),
+          hasVariants: isVariant,
+          variants,
+          stockInBase: isVariant
+            ? variants.reduce((n, v) => n + v.stockInBase, 0)
+            : Number(r.balance ?? 0),
           // Service-mode flag — recipe-backed items are made-to-order
           // from BOM ingredients, so they have no own stock balance.
           // Cashier grid renders an "Auto" badge instead of "Stok: N",
@@ -863,6 +941,12 @@ export const listPOSProducts = createServerFn({ method: 'POST' })
 
 const saleLineInput = z.object({
   itemId: z.string().uuid().nullable().optional(),
+  /**
+   * Chosen variant for variant items. Required when the item has
+   * variants; the server re-prices from the variant and deducts
+   * per-variant stock.
+   */
+  variantId: z.string().uuid().nullable().optional(),
   /** Required for ad-hoc lines; ignored when itemId is set (snapshot taken from item). */
   name: z.string().min(1).max(200).optional(),
   /**
@@ -1034,6 +1118,8 @@ export const createSale = createServerFn({ method: 'POST' })
               categoryId: inventoryItems.categoryId,
               linkedHppProductId: inventoryItems.linkedHppProductId,
               prepMode: inventoryItems.prepMode,
+              hasVariants: inventoryItems.hasVariants,
+              baseUnitId: inventoryItems.baseUnitId,
             })
             .from(inventoryItems)
             .where(
@@ -1062,6 +1148,45 @@ export const createSale = createServerFn({ method: 'POST' })
       productHpps.map((p) => [p.id, Number(p.hpp ?? 0)]),
     )
     const itemMap = new Map(itemRows.map((i) => [i.id, i]))
+
+    // Resolve variant rows for any variant lines — authoritative price +
+    // label + SKU snapshot. Stock is checked/deducted separately.
+    const lineVariantIds = data.lines
+      .map((l) => l.variantId)
+      .filter((id): id is string => Boolean(id))
+    const variantMap = new Map<
+      string,
+      { id: string; itemId: string; label: string; price: number; sku: string | null }
+    >()
+    if (lineVariantIds.length > 0) {
+      const vRows = await db
+        .select({
+          id: inventoryItemVariants.id,
+          itemId: inventoryItemVariants.itemId,
+          value1: inventoryItemVariants.value1,
+          value2: inventoryItemVariants.value2,
+          price: inventoryItemVariants.price,
+          sku: inventoryItemVariants.sku,
+          isActive: inventoryItemVariants.isActive,
+        })
+        .from(inventoryItemVariants)
+        .where(
+          and(
+            eq(inventoryItemVariants.tenantId, auth.tenantId),
+            inArray(inventoryItemVariants.id, lineVariantIds),
+            eq(inventoryItemVariants.isActive, true),
+          ),
+        )
+      for (const v of vRows) {
+        variantMap.set(v.id, {
+          id: v.id,
+          itemId: v.itemId,
+          label: v.value2 ? `${v.value1} / ${v.value2}` : v.value1,
+          price: Number(v.price),
+          sku: v.sku,
+        })
+      }
+    }
 
     // Pull units + tiers for every (item, unit) pair the client sent.
     // Indexed by `${itemId}|${unitId}` for O(1) tier lookup below.
@@ -1244,6 +1369,8 @@ export const createSale = createServerFn({ method: 'POST' })
     // Validate each line + compute snapshots.
     interface PreparedLine {
       itemId: string | null
+      variantId: string | null
+      variantLabel: string | null
       nameSnapshot: string
       skuSnapshot: string | null
       soldUnitId: string | null
@@ -1294,6 +1421,8 @@ export const createSale = createServerFn({ method: 'POST' })
         const sub = gross - ld.amount
         prepared.push({
           itemId: null,
+          variantId: null,
+          variantLabel: null,
           nameSnapshot: line.name,
           skuSnapshot: null,
           soldUnitId: null,
@@ -1315,6 +1444,51 @@ export const createSale = createServerFn({ method: 'POST' })
       } else {
         const item = itemMap.get(line.itemId)
         if (!item) throw new Error(`Item tidak ditemukan: ${line.itemId}`)
+        if (item.hasVariants) {
+          // Variant line — price + stock come from the chosen variant,
+          // not the unit pricing tiers.
+          if (!line.variantId)
+            throw new Error(`Pilih variasi untuk "${item.name}"`)
+          const variant = variantMap.get(line.variantId)
+          if (!variant || variant.itemId !== item.id)
+            throw new Error(`Variasi tidak valid untuk "${item.name}"`)
+          const unitInfo = line.unitId
+            ? unitInfoMap.get(`${line.itemId}|${line.unitId}`)
+            : undefined
+          const ratio = unitInfo?.ratioToBase ?? 1
+          const hppPerBase = item.costPrice ? Number(item.costPrice) : null
+          const gross = line.qty * variant.price
+          const ld = computeLineDiscount(gross, line.lineDiscount)
+          const bestAuto = pickAutoPromoForLine(
+            item.id,
+            item.categoryId,
+            gross - ld.amount,
+          )
+          const autoPromoAmount = bestAuto?.amount ?? 0
+          const sub = gross - ld.amount - autoPromoAmount
+          prepared.push({
+            itemId: item.id,
+            variantId: variant.id,
+            variantLabel: variant.label,
+            nameSnapshot: item.name,
+            skuSnapshot: variant.sku ?? item.sku ?? null,
+            soldUnitId: line.unitId ?? item.baseUnitId,
+            soldUnitLabel: unitInfo?.unitLabel ?? null,
+            qty: line.qty,
+            qtyInBase: line.qty * ratio,
+            unitPrice: variant.price,
+            subtotal: sub,
+            lineDiscountType: ld.type,
+            lineDiscountValue: ld.value,
+            lineDiscountAmount: ld.amount,
+            autoPromoId: bestAuto?.promo.id ?? null,
+            autoPromoAmount,
+            hppAtSale: hppPerBase != null ? hppPerBase * ratio : null,
+            isAdhoc: false,
+            isBulkPrice: false,
+          })
+          subtotal += sub
+        } else {
         if (!line.unitId) {
           throw new Error(`Unit harus diisi untuk item "${item.name}"`)
         }
@@ -1368,6 +1542,8 @@ export const createSale = createServerFn({ method: 'POST' })
         const sub = gross - ld.amount - autoPromoAmount
         prepared.push({
           itemId: item.id,
+          variantId: null,
+          variantLabel: null,
           nameSnapshot: item.name,
           skuSnapshot: item.sku ?? null,
           soldUnitId: unitInfo.unitId,
@@ -1386,6 +1562,7 @@ export const createSale = createServerFn({ method: 'POST' })
           isBulkPrice: isBulk,
         })
         subtotal += sub
+        }
       }
     }
 
@@ -1404,6 +1581,8 @@ export const createSale = createServerFn({ method: 'POST' })
       const requiredByItem = new Map<string, number>()
       for (const p of prepared) {
         if (!p.itemId || p.qtyInBase == null) continue
+        // Variant lines deduct per-variant stock — guarded separately.
+        if (p.variantId) continue
         if (itemMap.get(p.itemId)?.linkedHppProductId) continue
         requiredByItem.set(
           p.itemId,
@@ -1436,6 +1615,45 @@ export const createSale = createServerFn({ method: 'POST' })
             const name = item?.name ?? 'Item'
             throw new Error(
               `Stok ${name} tidak cukup. Tersedia ${available}, diminta ${required} (di unit dasar). Refresh kasir untuk lihat stok terbaru.`,
+            )
+          }
+        }
+      }
+
+      // Variant stock guard — per-variant balance at this branch.
+      const requiredByVariant = new Map<string, number>()
+      for (const p of prepared) {
+        if (!p.variantId || p.qtyInBase == null) continue
+        requiredByVariant.set(
+          p.variantId,
+          (requiredByVariant.get(p.variantId) ?? 0) + p.qtyInBase,
+        )
+      }
+      if (requiredByVariant.size > 0) {
+        const vBalances = await db
+          .select({
+            variantId: inventoryItemVariantStock.variantId,
+            quantity: inventoryItemVariantStock.quantity,
+          })
+          .from(inventoryItemVariantStock)
+          .where(
+            and(
+              inArray(
+                inventoryItemVariantStock.variantId,
+                Array.from(requiredByVariant.keys()),
+              ),
+              eq(inventoryItemVariantStock.branchId, data.branchId),
+            ),
+          )
+        const balByVariant = new Map(
+          vBalances.map((b) => [b.variantId, Number(b.quantity)]),
+        )
+        for (const [variantId, required] of requiredByVariant) {
+          const available = balByVariant.get(variantId) ?? 0
+          if (required > available) {
+            const label = variantMap.get(variantId)?.label ?? 'Variasi'
+            throw new Error(
+              `Stok ${label} tidak cukup. Tersedia ${available}, diminta ${required}. Refresh kasir untuk lihat stok terbaru.`,
             )
           }
         }
@@ -2200,6 +2418,8 @@ export const createSale = createServerFn({ method: 'POST' })
           tenantId: auth.tenantId,
           saleId: sale!.id,
           itemId: line.itemId,
+          variantId: line.variantId,
+          variantLabel: line.variantLabel,
           nameSnapshot: line.nameSnapshot,
           skuSnapshot: line.skuSnapshot,
           // qty is in the SOLD unit; qtyInBase carries the base-unit
@@ -2232,6 +2452,57 @@ export const createSale = createServerFn({ method: 'POST' })
 
         if (!line.itemId) continue
         const baseQty = line.qtyInBase ?? line.qty
+
+        // Variant line — deduct the chosen variant's stock instead of the
+        // item-level balance.
+        if (line.variantId) {
+          await tx.insert(inventoryMovements).values({
+            tenantId: auth.tenantId,
+            itemId: line.itemId,
+            variantId: line.variantId,
+            branchId: data.branchId,
+            movementType: 'out',
+            quantity: baseQty.toString(),
+            unitCost: line.hppAtSale != null ? line.hppAtSale.toString() : null,
+            reason: 'pos_sale',
+            referenceType: 'pos_sale',
+            referenceId: sale!.id,
+            notes: `Penjualan ${saleNumber}${line.variantLabel ? ` (${line.variantLabel})` : ''}`,
+            performedBy: auth.userId,
+          })
+          const [existingV] = await tx
+            .select({
+              id: inventoryItemVariantStock.id,
+              quantity: inventoryItemVariantStock.quantity,
+            })
+            .from(inventoryItemVariantStock)
+            .where(
+              and(
+                eq(inventoryItemVariantStock.variantId, line.variantId),
+                eq(inventoryItemVariantStock.branchId, data.branchId),
+              ),
+            )
+            .limit(1)
+          if (existingV) {
+            await tx
+              .update(inventoryItemVariantStock)
+              .set({
+                quantity: (Number(existingV.quantity) - baseQty).toString(),
+                lastMovementAt: now,
+                updatedAt: now,
+              })
+              .where(eq(inventoryItemVariantStock.id, existingV.id))
+          } else {
+            await tx.insert(inventoryItemVariantStock).values({
+              tenantId: auth.tenantId,
+              variantId: line.variantId,
+              branchId: data.branchId,
+              quantity: (-baseQty).toString(),
+              lastMovementAt: now,
+            })
+          }
+          continue
+        }
 
         // Service-mode: a recipe-backed inventory item (linkedHppProductId
         // set) is "made-to-order" — it doesn't carry its own stock. The
@@ -2887,6 +3158,8 @@ export const voidSale = createServerFn({ method: 'POST' })
         .select({
           id: posSaleItems.id,
           itemId: posSaleItems.itemId,
+          variantId: posSaleItems.variantId,
+          variantLabel: posSaleItems.variantLabel,
           qty: posSaleItems.qty,
           qtyInBase: posSaleItems.qtyInBase,
           hppAtSale: posSaleItems.hppAtSale,
@@ -2898,8 +3171,59 @@ export const voidSale = createServerFn({ method: 'POST' })
 
       for (const line of lines) {
         if (!line.itemId) continue // ad-hoc — no inventory effect
-        if (line.linkedHppProductId) continue // service-mode — no own stock
         const baseQty = line.qtyInBase ?? line.qty // fallback for legacy rows
+
+        // Variant line — restock the chosen variant's balance.
+        if (line.variantId) {
+          await tx.insert(inventoryMovements).values({
+            tenantId: auth.tenantId,
+            itemId: line.itemId,
+            variantId: line.variantId,
+            branchId: sale.branchId,
+            movementType: 'in',
+            quantity: baseQty,
+            unitCost: line.hppAtSale,
+            reason: 'pos_void',
+            referenceType: 'pos_sale',
+            referenceId: sale.id,
+            notes: `Pembatalan ${sale.saleNumber}: ${data.reason}${line.variantLabel ? ` (${line.variantLabel})` : ''}`,
+            performedBy: auth.userId,
+          })
+          const [existingV] = await tx
+            .select({
+              id: inventoryItemVariantStock.id,
+              quantity: inventoryItemVariantStock.quantity,
+            })
+            .from(inventoryItemVariantStock)
+            .where(
+              and(
+                eq(inventoryItemVariantStock.variantId, line.variantId),
+                eq(inventoryItemVariantStock.branchId, sale.branchId),
+              ),
+            )
+            .limit(1)
+          if (existingV) {
+            await tx
+              .update(inventoryItemVariantStock)
+              .set({
+                quantity: (Number(existingV.quantity) + Number(baseQty)).toString(),
+                lastMovementAt: now,
+                updatedAt: now,
+              })
+              .where(eq(inventoryItemVariantStock.id, existingV.id))
+          } else {
+            await tx.insert(inventoryItemVariantStock).values({
+              tenantId: auth.tenantId,
+              variantId: line.variantId,
+              branchId: sale.branchId,
+              quantity: baseQty,
+              lastMovementAt: now,
+            })
+          }
+          continue
+        }
+
+        if (line.linkedHppProductId) continue // service-mode — no own stock
 
         await tx.insert(inventoryMovements).values({
           tenantId: auth.tenantId,

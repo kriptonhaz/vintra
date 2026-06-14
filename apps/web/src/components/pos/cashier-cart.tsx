@@ -11,6 +11,10 @@ import type { POSFeatureFlag } from '@vintra/shared'
 export interface CartLine {
   rowKey: string
   itemId: string | null
+  /** Chosen variant for variant items. Null/undefined for plain items. */
+  variantId?: string | null
+  /** Variant label snapshot, e.g. "M / Merah". */
+  variantLabel?: string | null
   /** Inventory category for this item — drives `auto_category` promo
    *  matching client-side. Null for ad-hoc lines or uncategorised items. */
   categoryId?: string | null
@@ -969,6 +973,11 @@ function CartLineRow({
         <div className="min-w-0 flex-1">
           <p className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-gray-100">
             {line.name}
+            {line.variantLabel && (
+              <span className="ml-1 text-xs font-normal text-gray-500">
+                · {line.variantLabel}
+              </span>
+            )}
             {line.isAdhoc && (
               <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-normal text-gray-600 dark:bg-gray-700 dark:text-gray-400">
                 ad-hoc

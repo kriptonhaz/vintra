@@ -15,10 +15,11 @@ import {
   listActivePromotions,
   validatePromoCode,
 } from '@/server/functions/promotions'
-import { Clock, AlertTriangle, ShoppingCart, Stamp } from 'lucide-react'
+import { Clock, AlertTriangle, ShoppingCart, Stamp, X } from 'lucide-react'
 import {
   CashierProductGrid,
   type POSProduct,
+  type POSVariant,
 } from '@/components/pos/cashier-product-grid'
 import {
   CashierCart,
@@ -92,6 +93,8 @@ function CashierPage() {
   const [paymentOpen, setPaymentOpen] = React.useState(false)
   const [adhocOpen, setAdhocOpen] = React.useState(false)
   const [unitModalProduct, setUnitModalProduct] = React.useState<POSProduct | null>(null)
+  const [variantModalProduct, setVariantModalProduct] =
+    React.useState<POSProduct | null>(null)
   // JUR-15: prep-batch sheet state. Only opens for prep-mode tiles
   // when the user has inventory.write — gating happens here at the
   // page level so the grid doesn't have to know about permissions.
@@ -341,6 +344,7 @@ function CashierPage() {
           branchId,
           lines: lines.map((l) => ({
             itemId: l.itemId,
+            variantId: l.variantId ?? undefined,
             unitId: l.unitId,
             name: l.name,
             qty: l.qty,
@@ -465,6 +469,11 @@ function CashierPage() {
    * can pick unit + qty + see bulk thresholds.
    */
   function handleProductTap(p: POSProduct) {
+    // Variant items → pick the combo first (each has its own price + stock).
+    if (p.hasVariants && p.variants && p.variants.length > 0) {
+      setVariantModalProduct(p)
+      return
+    }
     const isSimple =
       p.units.length === 1 && (p.units[0]?.tiers.length ?? 0) <= 1
     if (isSimple) {
@@ -500,10 +509,20 @@ function CashierPage() {
     unitPrice: number
     isBulk: boolean
     tiers: Array<{ minQty: number; unitPrice: number }>
+    /** Variant fields — set when adding a specific variant combo. */
+    variantId?: string | null
+    variantLabel?: string | null
+    /** Stock cap for this line; overrides product.stockInBase (variants). */
+    stockOverride?: number
   }) {
+    const variantId = input.variantId ?? null
+    const stockCap = input.stockOverride ?? input.product.stockInBase
     setLines((prev) => {
       const existing = prev.find(
-        (l) => l.itemId === input.product.id && l.unitId === input.unitId,
+        (l) =>
+          l.itemId === input.product.id &&
+          l.unitId === input.unitId &&
+          (l.variantId ?? null) === variantId,
       )
       if (existing) {
         const newQty = existing.qty + input.qty
@@ -517,7 +536,7 @@ function CashierPage() {
                 isBulk: matched ? matched.minQty > 1 : l.isBulk,
                 // Refresh stock snapshot — the product list may have
                 // refetched between the two adds.
-                stockInBase: input.product.stockInBase,
+                stockInBase: stockCap,
                 recipeBacked: input.product.recipeBacked ?? false,
               }
             : l,
@@ -528,6 +547,8 @@ function CashierPage() {
         {
           rowKey: crypto.randomUUID(),
           itemId: input.product.id,
+          variantId,
+          variantLabel: input.variantLabel ?? null,
           categoryId: input.product.categoryId ?? null,
           unitId: input.unitId,
           name: input.product.name,
@@ -538,7 +559,7 @@ function CashierPage() {
           isBulk: input.isBulk,
           isAdhoc: false,
           tiers: input.tiers,
-          stockInBase: input.product.stockInBase,
+          stockInBase: stockCap,
           recipeBacked: input.product.recipeBacked ?? false,
         },
       ]
@@ -1097,6 +1118,39 @@ function CashierPage() {
         }}
       />
 
+      <VariantPickModal
+        product={variantModalProduct}
+        reservedByVariant={
+          variantModalProduct
+            ? lines.reduce<Record<string, number>>((acc, l) => {
+                if (l.itemId === variantModalProduct.id && l.variantId) {
+                  acc[l.variantId] =
+                    (acc[l.variantId] ?? 0) + l.qty * (l.ratioToBase ?? 1)
+                }
+                return acc
+              }, {})
+            : {}
+        }
+        onClose={() => setVariantModalProduct(null)}
+        onPick={(variant) => {
+          if (!variantModalProduct) return
+          addOrMergeLine({
+            product: variantModalProduct,
+            unitId: variantModalProduct.baseUnitId,
+            unitLabel: variantModalProduct.baseUnitLabel,
+            ratioToBase: 1,
+            qty: 1,
+            unitPrice: variant.price,
+            isBulk: false,
+            tiers: [],
+            variantId: variant.id,
+            variantLabel: variant.label,
+            stockOverride: variant.stockInBase,
+          })
+          setVariantModalProduct(null)
+        }}
+      />
+
       <PaymentModal
         open={paymentOpen}
         total={total}
@@ -1185,6 +1239,82 @@ function CashierPage() {
             />
           )
         })()}
+    </div>
+  )
+}
+
+/**
+ * Variant picker for the cashier — taps a variant item, picks the
+ * combo (each with its own price + remaining stock at this branch).
+ * Flat list of combos (fast for cashiers); tapping adds qty 1 to the
+ * cart and closes. `reservedByVariant` subtracts what's already in the
+ * cart so the remaining-stock figure (and the disable) stays honest.
+ */
+function VariantPickModal({
+  product,
+  reservedByVariant,
+  onClose,
+  onPick,
+}: {
+  product: POSProduct | null
+  reservedByVariant: Record<string, number>
+  onClose: () => void
+  onPick: (variant: POSVariant) => void
+}) {
+  if (!product) return null
+  const variants = product.variants ?? []
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="fixed inset-0 bg-black/40" onClick={onClose} aria-hidden="true" />
+      <div className="relative max-h-[80vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl sm:rounded-2xl dark:bg-gray-800">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-gray-900 dark:text-gray-100">
+              {product.name}
+            </h3>
+            <p className="text-xs text-gray-500">Pilih variasi</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Tutup"
+            className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="space-y-2">
+          {variants.map((v) => {
+            const remaining = v.stockInBase - (reservedByVariant[v.id] ?? 0)
+            const soldOut = remaining <= 0
+            return (
+              <button
+                key={v.id}
+                type="button"
+                disabled={soldOut}
+                onClick={() => onPick(v)}
+                className="flex w-full items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 text-left transition hover:border-brand-400 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:hover:bg-brand-900/20"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {v.label}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {soldOut ? 'Stok habis' : `Stok: ${remaining}`}
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-brand-700 dark:text-brand-300">
+                  {formatRupiah(v.price)}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
