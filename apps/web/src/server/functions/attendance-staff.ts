@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { requirePermission } from '../middleware/auth'
 import { requireActiveModule } from '../middleware/module-access'
 import { coerceStorablePhone } from '@vintra/shared'
+import { buildMemberInviteEmail, sendEmail } from '../email'
 
 const MODULE_KEY = 'attendance'
 
@@ -473,6 +474,9 @@ export const inviteStaff = createServerFn({ method: 'POST' })
     let member:
       | typeof tenantMembers.$inferSelect
       | undefined
+    // Activation link returned to the caller when a brand-new Supabase
+    // user was created via the invite path (null otherwise).
+    let inviteLink: string | null = null
 
     if (data.fromMemberId) {
       // "Buat profil staf" path from /settings/members. Member already
@@ -523,14 +527,61 @@ export const inviteStaff = createServerFn({ method: 'POST' })
         await assertUserNotAttachedElsewhere(user.id)
       }
 
-      // Only now, if we don't have a Supabase user, send the invite email.
+      // Only now, if we don't have a Supabase user, create the account +
+      // send the invite. Supabase's hosted SMTP is rate-limited in this
+      // project, so the old `inviteUserByEmail` path failed opaquely
+      // (surfaced as an empty "{}" error). Mirror inviteTenantMember:
+      // generate the action link ourselves (Supabase sends NO email) and
+      // deliver it via our Brevo pipeline.
       if (!user) {
-        const { data: invited, error: inviteErr } =
-          await supabase.auth.admin.inviteUserByEmail(data.email)
-        if (inviteErr || !invited.user) {
-          throw new Error(inviteErr?.message ?? 'Gagal mengundang pengguna')
+        const appUrl = process.env.VITE_APP_URL ?? 'http://localhost:3000'
+        const fullName =
+          [data.firstName, data.lastName].filter(Boolean).join(' ').trim() ||
+          data.email
+
+        const { data: linkData, error: linkErr } =
+          await supabase.auth.admin.generateLink({
+            type: 'invite',
+            email: data.email,
+            options: {
+              data: { full_name: fullName },
+              redirectTo: `${appUrl}/auth/reset-password`,
+            },
+          })
+        if (linkErr || !linkData.user || !linkData.properties?.action_link) {
+          throw new Error(
+            linkErr?.message ||
+              (linkErr as { code?: string } | null)?.code ||
+              'Gagal membuat undangan',
+          )
         }
-        user = invited.user
+        user = linkData.user
+        inviteLink = linkData.properties.action_link
+
+        // Best-effort Brevo delivery — a send failure does NOT abort; the
+        // account exists and `inviteLink` is returned for manual sharing.
+        const [tenantRow] = await db
+          .select({ businessName: tenants.businessName })
+          .from(tenants)
+          .where(eq(tenants.id, auth.tenantId))
+          .limit(1)
+        const tpl = buildMemberInviteEmail({
+          fullName,
+          businessName: tenantRow?.businessName ?? 'Vintra',
+          actionLink: inviteLink,
+        })
+        try {
+          await sendEmail({
+            to: data.email,
+            toName: fullName,
+            subject: tpl.subject,
+            htmlContent: tpl.htmlContent,
+            textContent: tpl.textContent,
+            tag: 'member-invite',
+          })
+        } catch (err) {
+          console.error('[inviteStaff] invite email send failed:', err)
+        }
       }
 
       const [staffRole] = await db
@@ -615,7 +666,7 @@ export const inviteStaff = createServerFn({ method: 'POST' })
       .returning()
 
     const email = await getUserEmail(member.userId)
-    return { ...profile, email }
+    return { ...profile, email, inviteLink }
   })
 
 const updateStaffSchema = z.object({
