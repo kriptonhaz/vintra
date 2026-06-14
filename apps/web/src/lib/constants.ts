@@ -362,6 +362,7 @@ export const MODULE_NAV: NavItem[] = [
     children: [
       { labelKey: 'site.navEditor', href: '/site/edit' },
       { labelKey: 'site.navStore', href: '/site/store' },
+      { labelKey: 'site.navOrders', href: '/site/orders' },
       { labelKey: 'site.navAnalytics', href: '/site/analytics' },
     ],
   },
@@ -444,6 +445,7 @@ export const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/booking/settings': 'route.bookingSettings',
   '/site/edit': 'route.siteEdit',
   '/site/store': 'route.siteStore',
+  '/site/orders': 'route.siteOrders',
   '/site/analytics': 'route.siteAnalytics',
   '/cashflow': 'route.cashflow',
   '/cashflow/dashboard': 'route.cashflowDashboard',

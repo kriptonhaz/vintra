@@ -57,6 +57,7 @@
     "bookingSettings": "Booking Settings",
     "siteEdit": "Site Editor",
     "siteStore": "Online Store",
+    "siteOrders": "Online Orders",
     "siteAnalytics": "Site Analytics",
     "cashflow": "Cashflow",
     "cashflowDashboard": "Cashflow Dashboard",
@@ -2356,7 +2357,8 @@
   "site": {
     "navEditor": "Site Editor",
     "navAnalytics": "Analytics",
-    "navStore": "Online Store"
+    "navStore": "Online Store",
+    "navOrders": "Online Orders"
   },
   "booking": {
     "navCalendar": "Booking Calendar",
