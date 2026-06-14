@@ -71,6 +71,10 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
   const ctaText = (settings.ctaText as string)?.trim() || ''
   const ctaAction = (settings.ctaAction as string) ?? 'whatsapp'
   const overlayDim = settings.overlayDim !== false
+  // Text-overlay toggles — let tenants whose hero photo already has
+  // baked-in text hide the auto heading + address so it doesn't clash.
+  const showHeading = settings.showHeading !== false
+  const showAddress = settings.showAddress !== false
 
   const images = resolveImages(
     settings.heroImages,
@@ -125,15 +129,17 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
           overlayDim={overlayDim}
         />
         <div className="relative mx-auto max-w-5xl px-4 py-20 text-center text-white sm:px-6 sm:py-28 lg:py-36">
-          <h1 className="text-3xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
-            {heading}
-          </h1>
+          {showHeading && (
+            <h1 className="text-3xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+              {heading}
+            </h1>
+          )}
           {tagline && (
             <p className="mx-auto mt-5 max-w-2xl text-base text-white/90 sm:mt-6 sm:text-lg">
               {tagline}
             </p>
           )}
-          {mainBranch?.address && (
+          {showAddress && mainBranch?.address && (
             // Wrap in a block <div> — without it the inline-flex <p>
             // and the inline-flex CTA below try to share a single line
             // and visually overlap.
@@ -174,15 +180,17 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
               className="mb-4 inline-block h-1 w-12 rounded-full"
               style={{ backgroundColor: theme.brandColor }}
             />
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl lg:text-5xl dark:text-gray-100">
-              {heading}
-            </h1>
+            {showHeading && (
+              <h1 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl lg:text-5xl dark:text-gray-100">
+                {heading}
+              </h1>
+            )}
             {tagline && (
               <p className="mt-4 text-base text-gray-600 sm:mt-5 sm:text-lg dark:text-gray-400">
                 {tagline}
               </p>
             )}
-            {mainBranch?.address && (
+            {showAddress && mainBranch?.address && (
               <div className="mt-3">
                 <p className="inline-flex items-center gap-1.5 text-xs text-gray-500 sm:text-sm">
                   <MapPin className="h-4 w-4" />
@@ -237,15 +245,17 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
       <div className="absolute -top-20 -right-20 h-80 w-80 rounded-full bg-white/10 blur-3xl" />
       <div className="absolute -bottom-20 -left-20 h-80 w-80 rounded-full bg-white/10 blur-3xl" />
       <div className="relative mx-auto max-w-5xl px-4 py-16 text-center sm:px-6 sm:py-24 lg:py-32">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
-          {heading}
-        </h1>
+        {showHeading && (
+          <h1 className="text-3xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+            {heading}
+          </h1>
+        )}
         {tagline && (
           <p className="mx-auto mt-5 max-w-2xl text-base text-white/90 sm:mt-6 sm:text-lg lg:text-xl">
             {tagline}
           </p>
         )}
-        {mainBranch?.address && (
+        {showAddress && mainBranch?.address && (
           <div className="mt-3">
             <p className="inline-flex items-center gap-1.5 text-xs text-white/80 sm:text-sm">
               <MapPin className="h-4 w-4" />
@@ -359,6 +369,8 @@ export const heroSection: SectionDef = {
     carouselAutoSlide: true,
     carouselDurationSec: 5,
     overlayDim: true,
+    showHeading: true,
+    showAddress: true,
   },
   fields: [
     {
@@ -419,12 +431,26 @@ export const heroSection: SectionDef = {
       default: '5',
     },
     {
+      key: 'showHeading',
+      type: 'toggle',
+      label: 'Tampilkan judul di atas foto',
+      help: 'Matikan jika foto hero sudah memuat teks sendiri, agar tidak bertumpuk.',
+      default: true,
+    },
+    {
       key: 'heading',
       type: 'text',
       label: 'Judul',
-      help: 'Kosongkan untuk pakai nama usaha otomatis.',
+      help: 'Kosongkan untuk pakai nama usaha otomatis. Diabaikan jika "Tampilkan judul" dimatikan.',
       maxLen: 80,
       placeholder: 'Selamat datang di…',
+    },
+    {
+      key: 'showAddress',
+      type: 'toggle',
+      label: 'Tampilkan alamat',
+      help: 'Tampilkan alamat cabang utama di bawah judul.',
+      default: true,
     },
     {
       key: 'tagline',
