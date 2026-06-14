@@ -277,7 +277,13 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
                   key={p.id}
                   className="group flex min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
                 >
-                  <div className="aspect-[4/3] w-full overflow-hidden bg-gray-50 dark:bg-gray-800">
+                  {/* Image + name link to the product page on the live
+                      site; in the editor preview there's no routing, so
+                      they're inert (no href). */}
+                  <a
+                    href={isEditorPreview ? undefined : `/product/${p.id}`}
+                    className="block aspect-[4/3] w-full overflow-hidden bg-gray-50 dark:bg-gray-800"
+                  >
                     {p.imageUrl ? (
                       <img
                         src={p.imageUrl}
@@ -295,11 +301,14 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
                         style={{ backgroundColor: theme.brandColor }}
                       />
                     )}
-                  </div>
+                  </a>
                   <div className="flex min-w-0 flex-1 flex-col p-3">
-                    <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">
+                    <a
+                      href={isEditorPreview ? undefined : `/product/${p.id}`}
+                      className="block text-sm font-semibold leading-tight text-gray-900 hover:underline dark:text-gray-100"
+                    >
                       {p.name}
-                    </p>
+                    </a>
                     <p
                       className="mt-1 text-base font-bold"
                       style={{ color: theme.brandColor }}

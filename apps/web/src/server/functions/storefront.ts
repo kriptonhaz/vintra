@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { db } from '@vintra/db'
 import {
   tenants,
+  tenantSites,
   branches,
   storefrontSettings,
   storefrontShippingZones,
@@ -32,6 +33,7 @@ import {
   onlineOrderCounters,
 } from '@vintra/db/schema'
 import { eq, and, inArray, asc, sql, isNull, or, lte, gte } from 'drizzle-orm'
+import { getRequest } from '@tanstack/react-start/server'
 import { getInventoryPhotoSignedUrl } from '@/lib/s3-storage'
 import { getTenantSiteAccessForTenantId } from '../middleware/module-access'
 import { computePromoAmount } from './promotions'
@@ -70,6 +72,198 @@ async function resolveTenant(slug: string): Promise<ResolvedTenant | null> {
   if (!access?.hasTenantSite) return null
   return tenant
 }
+
+/**
+ * Extract a tenant slug from the request Host header (`<slug>.vintra.my.id`).
+ * Returns null on the apex / www / api / dev (localhost) — the storefront
+ * page routes treat that as "no storefront here" and redirect to `/`.
+ * Mirrors the host parsing in getIndexRouteHostData.
+ */
+function slugFromHost(): string | null {
+  let host: string | null = null
+  try {
+    host = getRequest().headers.get('host')
+  } catch {
+    host = null
+  }
+  if (!host) return null
+  const hostname = host.split(':')[0]!.toLowerCase()
+  const m = hostname.match(/^([a-z0-9][a-z0-9-]{1,28}[a-z0-9])\.vintra\.my\.id$/)
+  if (!m) return null
+  const slug = m[1]!
+  if (slug === 'www' || slug === 'api') return null
+  return slug
+}
+
+/** The tenant's published brand color (for theming storefront pages). */
+async function brandColorFor(tenantId: string): Promise<string> {
+  const [row] = await db
+    .select({ published: tenantSites.publishedSettings })
+    .from(tenantSites)
+    .where(eq(tenantSites.tenantId, tenantId))
+    .limit(1)
+  const theme = (row?.published as { theme?: { brandColor?: unknown } } | null)
+    ?.theme
+  const c = theme?.brandColor
+  return typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#2563EB'
+}
+
+/**
+ * Shared context for every storefront sub-page (/cart, /checkout, /track).
+ * Resolves the tenant from the Host header; returns null on the apex so
+ * the route can redirect home.
+ */
+export const getStorefrontContext = createServerFn().handler(async () => {
+  const slug = slugFromHost()
+  if (!slug) return null
+  const tenant = await resolveTenant(slug)
+  if (!tenant) return null
+  return {
+    slug,
+    businessName: tenant.businessName,
+    brandColor: await brandColorFor(tenant.id),
+  }
+})
+
+/**
+ * Single product detail for the `/product/$id` page. Host-resolved.
+ * Returns null on apex / disabled store / missing-or-offline item so the
+ * route redirects or 404s.
+ */
+export const getStorefrontProduct = createServerFn()
+  .inputValidator(z.object({ id: z.string().uuid() }))
+  .handler(async ({ data }) => {
+    const slug = slugFromHost()
+    if (!slug) return null
+    const tenant = await resolveTenant(slug)
+    if (!tenant) return null
+
+    const [settings] = await db
+      .select()
+      .from(storefrontSettings)
+      .where(eq(storefrontSettings.tenantId, tenant.id))
+      .limit(1)
+    if (!settings?.isEnabled) return null
+
+    const branchId = await resolveFulfillmentBranchId(
+      tenant.id,
+      settings.fulfillmentBranchId,
+    )
+
+    const [item] = await db
+      .select({
+        id: inventoryItems.id,
+        name: inventoryItems.name,
+        notes: inventoryItems.notes,
+        photoKey: inventoryItems.photoKey,
+        onlineStockCap: inventoryItems.onlineStockCap,
+        shippingWeightGrams: inventoryItems.shippingWeightGrams,
+        hasVariants: inventoryItems.hasVariants,
+        variantConfig: inventoryItems.variantConfig,
+        category: tenantCategories.name,
+      })
+      .from(inventoryItems)
+      .leftJoin(
+        tenantCategories,
+        eq(inventoryItems.categoryId, tenantCategories.id),
+      )
+      .where(
+        and(
+          eq(inventoryItems.tenantId, tenant.id),
+          eq(inventoryItems.id, data.id),
+          eq(inventoryItems.isOnline, true),
+          eq(inventoryItems.isActive, true),
+        ),
+      )
+      .limit(1)
+    if (!item) return null
+
+    let unitPrice = '0'
+    let available: number | null = null
+    let variants: Array<{
+      id: string
+      value1: string
+      value2: string
+      label: string
+      price: number
+      available: number | null
+    }> = []
+
+    if (item.hasVariants) {
+      const vRows = await db
+        .select({
+          id: inventoryItemVariants.id,
+          value1: inventoryItemVariants.value1,
+          value2: inventoryItemVariants.value2,
+          price: inventoryItemVariants.price,
+          sortOrder: inventoryItemVariants.sortOrder,
+          stock: inventoryItemVariantStock.quantity,
+        })
+        .from(inventoryItemVariants)
+        .leftJoin(
+          inventoryItemVariantStock,
+          and(
+            eq(inventoryItemVariantStock.variantId, inventoryItemVariants.id),
+            branchId
+              ? eq(inventoryItemVariantStock.branchId, branchId)
+              : sql`false`,
+          ),
+        )
+        .where(
+          and(
+            eq(inventoryItemVariants.itemId, item.id),
+            eq(inventoryItemVariants.isActive, true),
+          ),
+        )
+        .orderBy(asc(inventoryItemVariants.sortOrder))
+      variants = vRows.map((v) => ({
+        id: v.id,
+        value1: v.value1,
+        value2: v.value2,
+        label: v.value2 ? `${v.value1} / ${v.value2}` : v.value1,
+        price: Number(v.price),
+        available: branchId ? Number(v.stock ?? 0) : null,
+      }))
+      const prices = variants.map((v) => v.price).filter((p) => p > 0)
+      unitPrice = prices.length > 0 ? String(Math.min(...prices)) : '0'
+      available = branchId
+        ? variants.reduce((n, v) => n + (v.available ?? 0), 0)
+        : null
+    } else {
+      unitPrice = (await firstTierPrices([item.id])).get(item.id) ?? '0'
+      available = branchId
+        ? ((await availableByItem(branchId, [item])).get(item.id) ?? 0)
+        : null
+    }
+
+    let imageUrl: string | null = null
+    if (item.photoKey) {
+      try {
+        imageUrl = await getInventoryPhotoSignedUrl(item.photoKey, 7 * 24 * 3600)
+      } catch {
+        // photo gone — omit
+      }
+    }
+
+    return {
+      slug,
+      businessName: tenant.businessName,
+      brandColor: await brandColorFor(tenant.id),
+      product: {
+        id: item.id,
+        name: item.name,
+        description: item.notes?.trim() || null,
+        imageUrl,
+        unitPrice,
+        available,
+        weightGrams: item.shippingWeightGrams,
+        category: item.category,
+        hasVariants: item.hasVariants,
+        variantConfig: item.hasVariants ? item.variantConfig : null,
+        variants,
+      },
+    }
+  })
 
 /** Fulfillment branch: configured one, else the oldest active branch. */
 async function resolveFulfillmentBranchId(
