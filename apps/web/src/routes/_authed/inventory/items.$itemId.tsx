@@ -26,6 +26,7 @@ import type {
   RecipeSubRecipe,
 } from '@/server/functions/inventory'
 import { PhotoUploadField } from '@/components/inventory/photo-upload-field'
+import { VariantManager } from '@/components/inventory/variant-manager'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -358,6 +359,8 @@ function ItemDetailPage() {
       {item.prepMode && item.linkedHppProductId && (
         <PrepBatchPanel item={item} branches={masters.branches} />
       )}
+
+      <VariantManager itemId={item.id} />
 
       {/*
         Service-mode (linkedHppProductId set) items have no own stock

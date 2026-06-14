@@ -7,6 +7,7 @@ import {
   boolean,
   timestamp,
   date,
+  jsonb,
   index,
   uniqueIndex,
   unique,
@@ -202,6 +203,25 @@ export const inventoryItems = pgTable(
      * balance. In the item's base unit.
      */
     onlineStockCap: numeric('online_stock_cap', { precision: 15, scale: 4 }),
+    /**
+     * Product variants (e.g. Ukuran × Warna). When true, the item is
+     * sold as one of its `inventory_item_variants` rows — each combo has
+     * its own price + per-branch stock. The item's own base price/stock
+     * become fallbacks. Surfaced online first; POS variant-selling is a
+     * later phase.
+     */
+    hasVariants: boolean('has_variants').notNull().default(false),
+    /**
+     * Variant dimension setup (1–2 dims), e.g.
+     *   { dims: [ {name:'Ukuran', values:['S','M','L']},
+     *             {name:'Warna',  values:['Merah','Biru']} ] }
+     * Names + values are seller-defined free text. The combinations are
+     * materialised as `inventory_item_variants` rows. Null when
+     * hasVariants is false.
+     */
+    variantConfig: jsonb('variant_config').$type<{
+      dims: Array<{ name: string; values: string[] }>
+    } | null>(),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -341,6 +361,13 @@ export const inventoryMovements = pgTable(
     itemId: uuid('item_id')
       .references(() => inventoryItems.id, { onDelete: 'cascade' })
       .notNull(),
+    /**
+     * Set when the movement targets a specific variant's stock (e.g. an
+     * online sale of "M / Merah"). Null for plain item-level movements.
+     * Defined as a column ref to avoid a forward-decl cycle — the FK is
+     * added in the migration.
+     */
+    variantId: uuid('variant_id'),
     branchId: uuid('branch_id')
       .references(() => branches.id, { onDelete: 'cascade' })
       .notNull(),
@@ -673,3 +700,77 @@ export const stockRequisitionCounters = pgTable('stock_requisition_counters', {
   year: integer('year').notNull(),
   nextSeq: integer('next_seq').notNull().default(1),
 })
+
+/**
+ * Product variant combinations (Phase 1). One row per generated combo of
+ * the item's `variantConfig` dims — e.g. (value1='M', value2='Merah').
+ * `value2` is '' for single-dimension items. Each combo carries its own
+ * selling price, optional SKU, and optional photo; stock lives in
+ * `inventory_item_variant_stock` (per branch).
+ */
+export const inventoryItemVariants = pgTable(
+  'inventory_item_variants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    itemId: uuid('item_id')
+      .references(() => inventoryItems.id, { onDelete: 'cascade' })
+      .notNull(),
+    /** First dimension value (e.g. 'M'). */
+    value1: text('value1').notNull(),
+    /** Second dimension value (e.g. 'Merah'); '' when single-dimension. */
+    value2: text('value2').notNull().default(''),
+    sku: text('sku'),
+    /** Per-variant selling price (absolute; defaults to the item price). */
+    price: numeric('price', { precision: 15, scale: 2 }).notNull().default('0'),
+    photoKey: text('photo_key'),
+    isActive: boolean('is_active').notNull().default(true),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    comboUnique: unique('inventory_item_variants_combo_unique').on(
+      t.itemId,
+      t.value1,
+      t.value2,
+    ),
+    itemIdx: index('inventory_item_variants_item_idx').on(t.itemId),
+  }),
+)
+
+/**
+ * Per-(variant, branch) stock. Kept separate from
+ * `inventory_stock_balances` (item-level, used by POS) so the existing
+ * cashier stock path is untouched while variants are online-first.
+ * `quantity` is in the item's base unit.
+ */
+export const inventoryItemVariantStock = pgTable(
+  'inventory_item_variant_stock',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    variantId: uuid('variant_id')
+      .references(() => inventoryItemVariants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: uuid('branch_id')
+      .references(() => branches.id, { onDelete: 'cascade' })
+      .notNull(),
+    quantity: numeric('quantity', { precision: 15, scale: 4 })
+      .notNull()
+      .default('0'),
+    lastMovementAt: timestamp('last_movement_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    uniq: unique('inventory_item_variant_stock_unique').on(
+      t.variantId,
+      t.branchId,
+    ),
+  }),
+)
