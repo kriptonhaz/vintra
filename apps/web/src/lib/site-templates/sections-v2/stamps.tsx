@@ -14,6 +14,7 @@
  */
 import { Stamp } from 'lucide-react'
 import type { SectionDef, SectionRenderProps } from '../v2-types'
+import { resolveSectionBg, BG_COLOR_FIELD } from './section-bg'
 
 function StampsRender({ data, settings, theme }: SectionRenderProps) {
   if (data.stampPrograms.length === 0) return null
@@ -31,10 +32,14 @@ function StampsRender({ data, settings, theme }: SectionRenderProps) {
   const gridColsClass =
     gridColumns === '2' ? 'sm:grid-cols-2' : 'sm:grid-cols-2 lg:grid-cols-3'
 
+  const bg = resolveSectionBg(settings, 'bg-gray-50 dark:bg-gray-950')
+
   return (
     <section
       id="stamps"
-      className="bg-gray-50 py-12 sm:py-16 lg:py-20 dark:bg-gray-950"
+      className={`py-12 sm:py-16 lg:py-20 ${bg.className}`}
+      style={bg.style}
+      data-section-surface={bg.surface}
     >
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="mb-8 text-center sm:mb-10">
@@ -220,6 +225,7 @@ export const stampsSection: SectionDef = {
       help: 'Misal "1× Teh Original + 1× Candy" untuk bundle, atau nama produk untuk single.',
       default: true,
     },
+    BG_COLOR_FIELD,
   ],
   Render: StampsRender,
 }

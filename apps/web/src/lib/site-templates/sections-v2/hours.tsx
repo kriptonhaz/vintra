@@ -5,6 +5,7 @@
  */
 import { Clock } from 'lucide-react'
 import type { SectionDef, SectionRenderProps } from '../v2-types'
+import { resolveSectionBg, BG_COLOR_FIELD } from './section-bg'
 
 const DAY_LABELS_ID = [
   'Minggu',
@@ -23,8 +24,14 @@ function HoursRender({ data, settings, theme }: SectionRenderProps) {
   const heading = (settings.heading as string)?.trim() || 'Jam Operasional'
   const today = new Date().getDay()
 
+  const bg = resolveSectionBg(settings, 'bg-white dark:bg-gray-900')
+
   return (
-    <section className="bg-white py-12 sm:py-16 lg:py-20 dark:bg-gray-900">
+    <section
+      className={`py-12 sm:py-16 lg:py-20 ${bg.className}`}
+      style={bg.style}
+      data-section-surface={bg.surface}
+    >
       <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8">
         <div className="mb-6 text-center sm:mb-8">
           <div
@@ -98,6 +105,7 @@ export const hoursSection: SectionDef = {
       maxLen: 60,
       default: 'Jam Operasional',
     },
+    BG_COLOR_FIELD,
   ],
   Render: HoursRender,
 }

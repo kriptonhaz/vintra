@@ -5,6 +5,7 @@
  */
 import { MapPin, Navigation } from 'lucide-react'
 import type { SectionDef, SectionRenderProps } from '../v2-types'
+import { resolveSectionBg, BG_COLOR_FIELD } from './section-bg'
 
 function BranchesRender({ data, settings, theme }: SectionRenderProps) {
   if (data.branches.length === 0) return null
@@ -12,8 +13,14 @@ function BranchesRender({ data, settings, theme }: SectionRenderProps) {
   const heading = (settings.heading as string)?.trim() || 'Lokasi Kami'
   const showMapsLink = settings.showMapsLink !== false
 
+  const bg = resolveSectionBg(settings, 'bg-gray-50 dark:bg-gray-950')
+
   return (
-    <section className="bg-gray-50 py-12 sm:py-16 lg:py-20 dark:bg-gray-950">
+    <section
+      className={`py-12 sm:py-16 lg:py-20 ${bg.className}`}
+      style={bg.style}
+      data-section-surface={bg.surface}
+    >
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="mb-8 text-center sm:mb-10">
           <div
@@ -100,6 +107,7 @@ export const branchesSection: SectionDef = {
       label: 'Tampilkan tombol "Buka di Google Maps"',
       default: true,
     },
+    BG_COLOR_FIELD,
   ],
   Render: BranchesRender,
 }

@@ -4,6 +4,7 @@
  * line-height, restrained max-width so paragraphs read smoothly.
  */
 import type { SectionDef, SectionRenderProps } from '../v2-types'
+import { resolveSectionBg, BG_COLOR_FIELD } from './section-bg'
 
 function AboutRender({ settings, theme, resolveAssetUrl }: SectionRenderProps) {
   const heading = (settings.heading as string)?.trim() || 'Tentang Kami'
@@ -13,9 +14,16 @@ function AboutRender({ settings, theme, resolveAssetUrl }: SectionRenderProps) {
 
   if (!body) return null
 
+  const bg = resolveSectionBg(settings, 'bg-white dark:bg-gray-900')
+  const sectionProps = {
+    className: `py-12 sm:py-16 lg:py-20 ${bg.className}`,
+    style: bg.style,
+    'data-section-surface': bg.surface,
+  }
+
   if (layout === 'side-by-side' && imageUrl) {
     return (
-      <section className="bg-white py-12 sm:py-16 lg:py-20 dark:bg-gray-900">
+      <section {...sectionProps}>
         <div className="mx-auto grid max-w-6xl items-center gap-8 px-4 sm:gap-12 sm:px-6 lg:grid-cols-2 lg:gap-16 lg:px-8">
           <div className="order-2 lg:order-1">
             <div
@@ -42,7 +50,7 @@ function AboutRender({ settings, theme, resolveAssetUrl }: SectionRenderProps) {
   }
 
   return (
-    <section className="bg-white py-12 sm:py-16 lg:py-20 dark:bg-gray-900">
+    <section {...sectionProps}>
       <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
         <div
           className="mx-auto mb-3 h-1 w-12 rounded-full sm:mb-4"
@@ -105,6 +113,7 @@ export const aboutSection: SectionDef = {
       aspectHint: '4:3',
       maxKB: 500,
     },
+    BG_COLOR_FIELD,
   ],
   Render: AboutRender,
 }

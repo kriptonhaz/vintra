@@ -10,6 +10,7 @@
  */
 import { Tag } from 'lucide-react'
 import type { SectionDef, SectionRenderProps } from '../v2-types'
+import { resolveSectionBg, BG_COLOR_FIELD } from './section-bg'
 
 function PromosRender({ data, settings, theme }: SectionRenderProps) {
   if (data.promos.length === 0) return null
@@ -55,10 +56,14 @@ function PromosRender({ data, settings, theme }: SectionRenderProps) {
         ? 'lg:grid-cols-3 xl:grid-cols-4'
         : 'lg:grid-cols-3'
 
+  const bg = resolveSectionBg(settings, 'bg-white dark:bg-gray-900')
+
   return (
     <section
       id="promos"
-      className="bg-white py-12 sm:py-16 lg:py-20 dark:bg-gray-900"
+      className={`py-12 sm:py-16 lg:py-20 ${bg.className}`}
+      style={bg.style}
+      data-section-surface={bg.surface}
     >
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="mb-8 text-center sm:mb-10">
@@ -268,6 +273,7 @@ export const promosSection: SectionDef = {
       help: 'Server sudah memfilter promo aktif, jadi opsi ini cadangan.',
       default: true,
     },
+    BG_COLOR_FIELD,
   ],
   Render: PromosRender,
 }

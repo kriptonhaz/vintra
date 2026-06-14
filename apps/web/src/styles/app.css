@@ -6,6 +6,32 @@
    preview light so it matches the always-light public site. */
 @variant dark (&:where(.dark, .dark *):not(:where(.light-scope, .light-scope *)));
 
+/* Per-section custom dark background (Situs builder). When a section's
+   background is set to a dark color it gets `data-section-surface="dark"`;
+   these rules flip the standard gray text utilities to readable light
+   tones so headings/body stay legible without per-section edits. The
+   descendant + :is() selector outranks the single-class utilities, so no
+   !important is needed. */
+[data-section-surface='dark'] :is(.text-gray-900, .text-gray-800, .text-gray-700) {
+  color: #f9fafb;
+}
+[data-section-surface='dark'] :is(.text-gray-600, .text-gray-500, .text-gray-400) {
+  color: rgb(229 231 235 / 0.85);
+}
+/* …but text inside a light "card" surface (product cards, search box,
+   etc.) must stay dark — those islands keep their own light background
+   even when the section behind them is dark. Higher specificity wins. */
+[data-section-surface='dark']
+  :is(.bg-white, .bg-gray-50, .bg-gray-100)
+  :is(.text-gray-900, .text-gray-800, .text-gray-700) {
+  color: #111827;
+}
+[data-section-surface='dark']
+  :is(.bg-white, .bg-gray-50, .bg-gray-100)
+  :is(.text-gray-600, .text-gray-500, .text-gray-400) {
+  color: #4b5563;
+}
+
 @theme {
   /* ── Vintra "Midnight Sapphire & Champagne" palette ──────────────
    * brand   — deep sapphire, the single workhorse hue

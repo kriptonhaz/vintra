@@ -32,6 +32,7 @@ import {
   trackOrder,
 } from '@/server/functions/storefront'
 import type { SectionDef, SectionRenderProps } from '../v2-types'
+import { resolveSectionBg, BG_COLOR_FIELD } from './section-bg'
 
 const TRACK_STATUS_LABEL: Record<string, string> = {
   pending: 'Menunggu pembayaran',
@@ -152,10 +153,14 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
     }
   }
 
+  const bg = resolveSectionBg(settings, 'bg-white dark:bg-gray-900')
+
   return (
     <section
       id="shop"
-      className="bg-white py-12 sm:py-16 lg:py-20 dark:bg-gray-900"
+      className={`py-12 sm:py-16 lg:py-20 ${bg.className}`}
+      style={bg.style}
+      data-section-surface={bg.surface}
     >
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="mb-8 text-center sm:mb-10">
@@ -1243,6 +1248,7 @@ export const shopSection: SectionDef = {
       ],
       default: '24',
     },
+    BG_COLOR_FIELD,
   ],
   Render: ShopRender,
 }
