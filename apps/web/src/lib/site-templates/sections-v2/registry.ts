@@ -23,6 +23,7 @@ import type {
 import { heroSection } from './hero'
 import { aboutSection } from './about'
 import { servicesSection } from './services'
+import { shopSection } from './shop'
 import { queueSection } from './queue'
 import { branchesSection } from './branches'
 import { hoursSection } from './hours'
@@ -38,6 +39,7 @@ export const SECTIONS: Record<string, SectionDef> = {
   [heroSection.type]: heroSection,
   [aboutSection.type]: aboutSection,
   [servicesSection.type]: servicesSection,
+  [shopSection.type]: shopSection,
   [queueSection.type]: queueSection,
   [branchesSection.type]: branchesSection,
   [hoursSection.type]: hoursSection,
@@ -59,6 +61,7 @@ export const ADDABLE_SECTION_TYPES: string[] = [
   heroSection.type,
   aboutSection.type,
   servicesSection.type,
+  shopSection.type,
   promosSection.type,
   stampsSection.type,
   queueSection.type,

@@ -1,0 +1,833 @@
+/**
+ * Shop (Toko Online) — public storefront section.
+ *
+ * Self-contained: fetches its own catalog + config via getStorefront
+ * (keyed by the tenant's public slug from `data.tenant.publicSlug`),
+ * keeps the cart in a module-level store, and renders a fixed-position
+ * cart drawer that walks cart → checkout → confirmation. Nothing here
+ * touches the cached public-site data pipeline.
+ *
+ * In the editor preview (`isEditorPreview`) the catalog renders so the
+ * tenant can see the layout, but the floating cart + add-to-cart are
+ * disabled (no real shopping inside the editor).
+ */
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { ShoppingCart, X, Plus, Minus, Trash2, Check, Loader2 } from 'lucide-react'
+import { formatRupiah } from '@/lib/currency'
+import { useCart } from '@/lib/storefront/cart-store'
+import {
+  getStorefront,
+  validateStorefrontPromo,
+  placeOrder,
+} from '@/server/functions/storefront'
+import type { SectionDef, SectionRenderProps } from '../v2-types'
+
+const PAYMENT_LABEL: Record<string, string> = {
+  cash: 'Tunai (bayar di tempat)',
+  qris: 'QRIS',
+  transfer: 'Transfer Bank',
+  card: 'Kartu',
+  ewallet: 'E-Wallet',
+  gopay: 'GoPay',
+  shopeepay: 'ShopeePay',
+  ovo: 'OVO',
+}
+
+type Storefront = NonNullable<Awaited<ReturnType<typeof getStorefront>>>
+
+function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderProps) {
+  const slug = data.tenant.publicSlug
+  const heading = (settings.heading as string)?.trim() || 'Belanja Online'
+
+  const { data: store, isLoading } = useQuery({
+    queryKey: ['storefront', slug],
+    queryFn: () => getStorefront({ data: { slug: slug as string } }),
+    enabled: !!slug,
+    staleTime: 60_000,
+  })
+
+  const cart = useCart(slug ?? '')
+
+  // Live site hides the whole section when the store is off; the editor
+  // preview still shows the catalog (with a hint) so layout is visible.
+  if (!slug) return null
+  if (!isEditorPreview && store && !store.enabled) return null
+
+  return (
+    <section
+      id="shop"
+      className="bg-white py-12 sm:py-16 lg:py-20 dark:bg-gray-900"
+    >
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="mb-8 text-center sm:mb-10">
+          <div
+            className="mx-auto mb-3 h-1 w-12 rounded-full sm:mb-4"
+            style={{ backgroundColor: theme.brandColor }}
+          />
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl lg:text-4xl dark:text-gray-100">
+            {heading}
+          </h2>
+          {isEditorPreview && store && !store.enabled && (
+            <p className="mt-2 text-xs italic text-amber-600">
+              Toko online belum aktif — aktifkan di Situs → Toko Online.
+            </p>
+          )}
+        </div>
+
+        {isLoading ? (
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="aspect-[3/4] animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800"
+              />
+            ))}
+          </div>
+        ) : !store || store.products.length === 0 ? (
+          <p className="text-center text-sm text-gray-500">
+            Belum ada produk yang dijual online.
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+            {store.products.map((p) => {
+              const inCart = cart.items.find((i) => i.itemId === p.id)?.qty ?? 0
+              const soldOut = p.available != null && p.available <= 0
+              const atMax = p.available != null && inCart >= p.available
+              return (
+                <div
+                  key={p.id}
+                  className="group flex min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
+                >
+                  <div className="aspect-[4/3] w-full overflow-hidden bg-gray-50 dark:bg-gray-800">
+                    {p.imageUrl ? (
+                      <img
+                        src={p.imageUrl}
+                        alt={p.name}
+                        loading="lazy"
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <div
+                        className="h-full w-full opacity-20"
+                        style={{ backgroundColor: theme.brandColor }}
+                      />
+                    )}
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-col p-3">
+                    <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">
+                      {p.name}
+                    </p>
+                    <p
+                      className="mt-1 text-base font-bold"
+                      style={{ color: theme.brandColor }}
+                    >
+                      {formatRupiah(Number(p.unitPrice))}
+                    </p>
+                    {soldOut ? (
+                      <span className="mt-auto pt-2 text-xs font-medium text-gray-400">
+                        Stok habis
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isEditorPreview || atMax}
+                        onClick={() =>
+                          cart.add(
+                            {
+                              itemId: p.id,
+                              name: p.name,
+                              unitPrice: Number(p.unitPrice),
+                              imageUrl: p.imageUrl,
+                              maxQty: p.available,
+                              weightGrams: p.weightGrams,
+                            },
+                            1,
+                          )
+                        }
+                        className="mt-auto flex items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ backgroundColor: theme.brandColor }}
+                      >
+                        <Plus className="h-4 w-4" />
+                        {inCart > 0 ? `Keranjang (${inCart})` : 'Keranjang'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {!isEditorPreview && store?.enabled && (
+        <CartWidget slug={slug} store={store} brandColor={theme.brandColor} />
+      )}
+    </section>
+  )
+}
+
+// ─── Floating cart button + drawer ─────────────────────────────────
+
+type DrawerView = 'cart' | 'checkout' | 'done'
+
+function CartWidget({
+  slug,
+  store,
+  brandColor,
+}: {
+  slug: string
+  store: Storefront
+  brandColor: string
+}) {
+  const cart = useCart(slug)
+  const [open, setOpen] = useState(false)
+  const [view, setView] = useState<DrawerView>('cart')
+
+  // Promo state.
+  const [promoInput, setPromoInput] = useState('')
+  const [promo, setPromo] = useState<{ code: string; amount: number } | null>(
+    null,
+  )
+  const [promoMsg, setPromoMsg] = useState<string | null>(null)
+  const [promoChecking, setPromoChecking] = useState(false)
+
+  // Checkout form.
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [fulfillment, setFulfillment] = useState<'delivery' | 'pickup'>(
+    store.shipping.deliveryEnabled ? 'delivery' : 'pickup',
+  )
+  const [address, setAddress] = useState('')
+  const [zoneId, setZoneId] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState(
+    store.payment.methods[0] ?? '',
+  )
+  const [note, setNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitErr, setSubmitErr] = useState<string | null>(null)
+  const [done, setDone] = useState<Awaited<ReturnType<typeof placeOrder>> | null>(
+    null,
+  )
+
+  // Totals.
+  const subtotal = cart.subtotal
+  const promoAmount = promo ? Math.min(promo.amount, subtotal) : 0
+  const taxBase = Math.max(0, subtotal - promoAmount)
+  const taxAmount = store.tax.apply
+    ? store.tax.lines.reduce(
+        (s, t) => s + Math.round((taxBase * t.percent) / 100),
+        0,
+      )
+    : 0
+  const selectedZone = store.shipping.zones.find((z) => z.id === zoneId)
+  const shippingFee =
+    fulfillment === 'pickup'
+      ? 0
+      : selectedZone
+        ? selectedZone.fee
+        : store.shipping.flatFee
+  const total = taxBase + taxAmount + shippingFee
+
+  async function applyPromo() {
+    if (!promoInput.trim()) return
+    setPromoChecking(true)
+    setPromoMsg(null)
+    try {
+      const res = await validateStorefrontPromo({
+        data: { slug, code: promoInput.trim(), subtotal },
+      })
+      if (res.valid) {
+        setPromo({ code: res.code, amount: res.amount })
+        setPromoMsg(`Promo "${res.name}" diterapkan`)
+      } else {
+        setPromo(null)
+        setPromoMsg(res.message)
+      }
+    } catch {
+      setPromoMsg('Gagal memeriksa promo')
+    } finally {
+      setPromoChecking(false)
+    }
+  }
+
+  async function submit() {
+    setSubmitErr(null)
+    if (!name.trim() || !phone.trim()) {
+      setSubmitErr('Nama dan nomor WhatsApp wajib diisi')
+      return
+    }
+    if (fulfillment === 'delivery' && !address.trim()) {
+      setSubmitErr('Alamat pengiriman wajib diisi')
+      return
+    }
+    if (!paymentMethod) {
+      setSubmitErr('Pilih metode pembayaran')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const res = await placeOrder({
+        data: {
+          slug,
+          fulfillmentType: fulfillment,
+          customerName: name,
+          customerPhone: phone,
+          items: cart.items.map((i) => ({ itemId: i.itemId, qty: i.qty })),
+          shippingRecipient: fulfillment === 'delivery' ? name : null,
+          shippingPhone: fulfillment === 'delivery' ? phone : null,
+          shippingAddress: fulfillment === 'delivery' ? address : null,
+          shippingZoneId: fulfillment === 'delivery' && zoneId ? zoneId : null,
+          promoCode: promo?.code ?? null,
+          paymentMethod,
+          customerNote: note.trim() || null,
+        },
+      })
+      setDone(res)
+      setView('done')
+      cart.clear()
+    } catch (err) {
+      setSubmitErr(err instanceof Error ? err.message : 'Gagal membuat pesanan')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <>
+      {/* Floating button */}
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(true)
+          if (view === 'done') setView('cart')
+        }}
+        className="fixed bottom-5 right-5 z-[900] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition hover:scale-105"
+        style={{ backgroundColor: brandColor }}
+        aria-label="Buka keranjang"
+      >
+        <ShoppingCart className="h-6 w-6" />
+        {cart.count > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-bold text-white">
+            {cart.count}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-[950] flex justify-end" role="dialog" aria-modal="true">
+          <div
+            className="fixed inset-0 bg-black/50"
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="relative flex h-full w-full max-w-md flex-col bg-white shadow-2xl dark:bg-gray-900">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                {view === 'cart'
+                  ? 'Keranjang'
+                  : view === 'checkout'
+                    ? 'Checkout'
+                    : 'Pesanan Dibuat'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Tutup"
+                className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              {view === 'cart' && (
+                <CartView
+                  cart={cart}
+                  brandColor={brandColor}
+                  promoInput={promoInput}
+                  setPromoInput={setPromoInput}
+                  applyPromo={applyPromo}
+                  promo={promo}
+                  promoMsg={promoMsg}
+                  promoChecking={promoChecking}
+                  clearPromo={() => {
+                    setPromo(null)
+                    setPromoMsg(null)
+                    setPromoInput('')
+                  }}
+                />
+              )}
+
+              {view === 'checkout' && (
+                <CheckoutView
+                  store={store}
+                  name={name}
+                  setName={setName}
+                  phone={phone}
+                  setPhone={setPhone}
+                  fulfillment={fulfillment}
+                  setFulfillment={setFulfillment}
+                  address={address}
+                  setAddress={setAddress}
+                  zoneId={zoneId}
+                  setZoneId={setZoneId}
+                  paymentMethod={paymentMethod}
+                  setPaymentMethod={setPaymentMethod}
+                  note={note}
+                  setNote={setNote}
+                />
+              )}
+
+              {view === 'done' && done && (
+                <DoneView done={done} brandColor={brandColor} />
+              )}
+            </div>
+
+            {/* Footer */}
+            {view !== 'done' && cart.items.length > 0 && (
+              <div className="border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                <TotalsRows
+                  subtotal={subtotal}
+                  promoAmount={promoAmount}
+                  taxAmount={taxAmount}
+                  shippingFee={fulfillment === 'pickup' ? null : shippingFee}
+                  total={total}
+                />
+                {submitErr && (
+                  <p className="mt-2 text-xs text-red-600">{submitErr}</p>
+                )}
+                {view === 'cart' ? (
+                  <button
+                    type="button"
+                    onClick={() => setView('checkout')}
+                    className="mt-3 w-full rounded-lg px-4 py-3 text-sm font-semibold text-white"
+                    style={{ backgroundColor: brandColor }}
+                  >
+                    Lanjut ke Checkout
+                  </button>
+                ) : (
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setView('cart')}
+                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                    >
+                      Kembali
+                    </button>
+                    <button
+                      type="button"
+                      onClick={submit}
+                      disabled={submitting}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                      style={{ backgroundColor: brandColor }}
+                    >
+                      {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                      Buat Pesanan
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function CartView({
+  cart,
+  brandColor,
+  promoInput,
+  setPromoInput,
+  applyPromo,
+  promo,
+  promoMsg,
+  promoChecking,
+  clearPromo,
+}: {
+  cart: ReturnType<typeof useCart>
+  brandColor: string
+  promoInput: string
+  setPromoInput: (v: string) => void
+  applyPromo: () => void
+  promo: { code: string; amount: number } | null
+  promoMsg: string | null
+  promoChecking: boolean
+  clearPromo: () => void
+}) {
+  if (cart.items.length === 0) {
+    return (
+      <p className="py-10 text-center text-sm text-gray-500">
+        Keranjang masih kosong.
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-3">
+      {cart.items.map((i) => (
+        <div key={i.itemId} className="flex gap-3">
+          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800">
+            {i.imageUrl && (
+              <img src={i.imageUrl} alt={i.name} className="h-full w-full object-contain" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+              {i.name}
+            </p>
+            <p className="text-sm font-semibold" style={{ color: brandColor }}>
+              {formatRupiah(i.unitPrice)}
+            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => cart.setQty(i.itemId, i.qty - 1)}
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-300 dark:border-gray-600"
+                aria-label="Kurangi"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+              <span className="w-6 text-center text-sm tabular-nums">{i.qty}</span>
+              <button
+                type="button"
+                onClick={() => cart.setQty(i.itemId, i.qty + 1)}
+                disabled={i.maxQty != null && i.qty >= i.maxQty}
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-300 disabled:opacity-40 dark:border-gray-600"
+                aria-label="Tambah"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => cart.remove(i.itemId)}
+                className="ml-auto rounded-md p-1.5 text-gray-400 hover:text-red-600"
+                aria-label="Hapus"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {/* Promo */}
+      <div className="border-t border-gray-100 pt-3 dark:border-gray-800">
+        {promo ? (
+          <div className="flex items-center justify-between rounded-lg bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
+            <span className="font-medium text-green-700 dark:text-green-300">
+              Promo {promo.code} aktif
+            </span>
+            <button
+              type="button"
+              onClick={clearPromo}
+              className="text-xs text-gray-500 underline"
+            >
+              Hapus
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <input
+                value={promoInput}
+                onChange={(e) => setPromoInput(e.target.value)}
+                placeholder="Kode promo"
+                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+              />
+              <button
+                type="button"
+                onClick={applyPromo}
+                disabled={promoChecking || !promoInput.trim()}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium disabled:opacity-50 dark:border-gray-600"
+              >
+                Pakai
+              </button>
+            </div>
+            {promoMsg && (
+              <p className="mt-1 text-xs text-gray-500">{promoMsg}</p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CheckoutView({
+  store,
+  name,
+  setName,
+  phone,
+  setPhone,
+  fulfillment,
+  setFulfillment,
+  address,
+  setAddress,
+  zoneId,
+  setZoneId,
+  paymentMethod,
+  setPaymentMethod,
+  note,
+  setNote,
+}: {
+  store: Storefront
+  name: string
+  setName: (v: string) => void
+  phone: string
+  setPhone: (v: string) => void
+  fulfillment: 'delivery' | 'pickup'
+  setFulfillment: (v: 'delivery' | 'pickup') => void
+  address: string
+  setAddress: (v: string) => void
+  zoneId: string
+  setZoneId: (v: string) => void
+  paymentMethod: string
+  setPaymentMethod: (v: string) => void
+  note: string
+  setNote: (v: string) => void
+}) {
+  const inputCls =
+    'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800'
+  const labelCls =
+    'mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300'
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className={labelCls}>Nama</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
+      </div>
+      <div>
+        <label className={labelCls}>Nomor WhatsApp</label>
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="0812xxxxxxx"
+          className={inputCls}
+        />
+      </div>
+
+      {store.shipping.deliveryEnabled && store.shipping.pickupEnabled && (
+        <div className="flex gap-2">
+          {(['delivery', 'pickup'] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFulfillment(f)}
+              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${
+                fulfillment === f
+                  ? 'border-gray-900 dark:border-gray-100'
+                  : 'border-gray-300 text-gray-600 dark:border-gray-600'
+              }`}
+            >
+              {f === 'delivery' ? 'Kirim' : 'Ambil sendiri'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {fulfillment === 'delivery' && (
+        <>
+          <div>
+            <label className={labelCls}>Alamat pengiriman</label>
+            <textarea
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              rows={3}
+              className={inputCls}
+            />
+          </div>
+          {store.shipping.zones.length > 0 && (
+            <div>
+              <label className={labelCls}>Zona ongkir</label>
+              <select
+                value={zoneId}
+                onChange={(e) => setZoneId(e.target.value)}
+                className={inputCls}
+              >
+                <option value="">
+                  Ongkir flat ({formatRupiah(store.shipping.flatFee)})
+                </option>
+                {store.shipping.zones.map((z) => (
+                  <option key={z.id} value={z.id}>
+                    {z.name} ({formatRupiah(z.fee)})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </>
+      )}
+
+      <div>
+        <label className={labelCls}>Metode pembayaran</label>
+        <select
+          value={paymentMethod}
+          onChange={(e) => setPaymentMethod(e.target.value)}
+          className={inputCls}
+        >
+          {store.payment.methods.map((m) => (
+            <option key={m} value={m}>
+              {PAYMENT_LABEL[m] ?? m}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className={labelCls}>Catatan (opsional)</label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={2}
+          className={inputCls}
+        />
+      </div>
+    </div>
+  )
+}
+
+function DoneView({
+  done,
+  brandColor,
+}: {
+  done: NonNullable<Awaited<ReturnType<typeof placeOrder>>>
+  brandColor: string
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col items-center text-center">
+        <div
+          className="flex h-14 w-14 items-center justify-center rounded-full text-white"
+          style={{ backgroundColor: brandColor }}
+        >
+          <Check className="h-7 w-7" />
+        </div>
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+          Pesanan kamu
+        </p>
+        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+          {done.orderNumber}
+        </p>
+        <p className="mt-1 text-lg font-semibold" style={{ color: brandColor }}>
+          {formatRupiah(done.total)}
+        </p>
+      </div>
+
+      {done.bankAccounts.length > 0 && (
+        <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Transfer ke
+          </p>
+          <div className="space-y-2">
+            {done.bankAccounts.map((b, i) => (
+              <div key={i} className="text-sm">
+                <p className="font-semibold text-gray-900 dark:text-gray-100">
+                  {b.bankName}
+                </p>
+                <p className="tabular-nums text-gray-700 dark:text-gray-300">
+                  {b.accountNumber}
+                </p>
+                <p className="text-xs text-gray-500">a.n. {b.accountHolder}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {done.checkoutNote && (
+        <p className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+          {done.checkoutNote}
+        </p>
+      )}
+
+      <p className="text-center text-xs text-gray-500">
+        Simpan nomor pesanan untuk lacak status. Setelah bayar, konfirmasi lewat
+        WhatsApp.
+      </p>
+
+      {done.waLink && (
+        <a
+          href={done.waLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-3 text-sm font-semibold text-white"
+        >
+          <ShoppingCart className="h-4 w-4" />
+          Konfirmasi via WhatsApp
+        </a>
+      )}
+    </div>
+  )
+}
+
+function TotalsRows({
+  subtotal,
+  promoAmount,
+  taxAmount,
+  shippingFee,
+  total,
+}: {
+  subtotal: number
+  promoAmount: number
+  taxAmount: number
+  shippingFee: number | null
+  total: number
+}) {
+  const row = 'flex justify-between text-sm'
+  return (
+    <div className="space-y-1">
+      <div className={row}>
+        <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
+        <span className="tabular-nums">{formatRupiah(subtotal)}</span>
+      </div>
+      {promoAmount > 0 && (
+        <div className={row}>
+          <span className="text-gray-600 dark:text-gray-400">Promo</span>
+          <span className="tabular-nums text-green-600">
+            −{formatRupiah(promoAmount)}
+          </span>
+        </div>
+      )}
+      {taxAmount > 0 && (
+        <div className={row}>
+          <span className="text-gray-600 dark:text-gray-400">Pajak</span>
+          <span className="tabular-nums">{formatRupiah(taxAmount)}</span>
+        </div>
+      )}
+      {shippingFee != null && (
+        <div className={row}>
+          <span className="text-gray-600 dark:text-gray-400">Ongkir</span>
+          <span className="tabular-nums">{formatRupiah(shippingFee)}</span>
+        </div>
+      )}
+      <div className="flex justify-between border-t border-gray-200 pt-1 text-base font-bold dark:border-gray-700">
+        <span>Total</span>
+        <span className="tabular-nums">{formatRupiah(total)}</span>
+      </div>
+    </div>
+  )
+}
+
+export const shopSection: SectionDef = {
+  type: 'shop',
+  name: 'Toko Online',
+  description: 'Katalog produk dengan keranjang & checkout (butuh Toko Online aktif).',
+  icon: 'ShoppingCart',
+  allowMultiple: false,
+  defaultSettings: {
+    heading: 'Belanja Online',
+  },
+  fields: [
+    {
+      key: 'heading',
+      type: 'text',
+      label: 'Judul',
+      maxLen: 60,
+      default: 'Belanja Online',
+    },
+  ],
+  Render: ShopRender,
+}
