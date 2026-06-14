@@ -15,7 +15,7 @@
  * render is faster, lets the editor share React state with the
  * preview, and dodges all the postMessage plumbing.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -641,7 +641,7 @@ function SiteEditorPage() {
               <Eye className="h-3.5 w-3.5" />
               Pratinjau Live
             </div>
-            <div className="overflow-hidden rounded-2xl border border-gray-200 shadow-sm dark:border-gray-700">
+            <DesktopPreviewFrame>
               <PublicSiteRenderV2
                 settings={settings}
                 data={renderData}
@@ -650,7 +650,7 @@ function SiteEditorPage() {
                 }
                 isEditorPreview
               />
-            </div>
+            </DesktopPreviewFrame>
             <p className="mt-2 px-1 text-xs text-gray-500">
               Tampilan persis seperti yang dilihat customer di{' '}
               {publicSlug ? `${publicSlug}.vintra.my.id` : 'subdomain Anda nanti'}.
@@ -684,6 +684,71 @@ function SiteEditorPage() {
         }}
         onCancel={() => setPendingPresetId(null)}
       />
+    </div>
+  )
+}
+
+// ─── Desktop preview frame ───────────────────────────────────────────
+
+/**
+ * Renders the live preview at a fixed desktop width (1280px) and scales
+ * it down with CSS `transform: scale()` to fit whatever width the right
+ * column gives us — the Framer-style "mini desktop" preview. The visitor
+ * sees the exact desktop layout, just zoomed out, instead of the cramped
+ * narrow render the raw container width would produce.
+ *
+ * A ResizeObserver tracks both the container (to recompute the scale on
+ * window resize) and the inner content (whose height changes on every
+ * keystroke as sections are edited), so the outer box always hugs the
+ * scaled height with no dead space.
+ */
+function DesktopPreviewFrame({ children }: { children: React.ReactNode }) {
+  const DESKTOP_WIDTH = 1280
+  const containerRef = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(0.5)
+  const [scaledHeight, setScaledHeight] = useState(0)
+
+  useEffect(() => {
+    const container = containerRef.current
+    const inner = innerRef.current
+    if (!container || !inner) return
+
+    const update = () => {
+      const nextScale = container.clientWidth / DESKTOP_WIDTH
+      setScale(nextScale)
+      setScaledHeight(inner.scrollHeight * nextScale)
+    }
+
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(container)
+    ro.observe(inner)
+    return () => ro.disconnect()
+  }, [])
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      {/* Browser chrome — sells the "desktop window" feel. */}
+      <div className="flex items-center gap-1.5 border-b border-gray-200 bg-gray-100 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+        <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
+        <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+        <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
+      </div>
+      <div ref={containerRef} className="overflow-hidden">
+        <div style={{ height: scaledHeight }}>
+          <div
+            ref={innerRef}
+            style={{
+              width: DESKTOP_WIDTH,
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+            }}
+          >
+            {children}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
