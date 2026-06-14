@@ -78,6 +78,12 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
   // 'cover' crops the photo to fill (background hero); 'full' shows the
   // whole image (for pre-made banners that already contain their copy).
   const imageFit = (settings.imageFit as string) === 'full' ? 'full' : 'cover'
+  // Optional fixed hero height (in vh). 'auto' = cover→text-driven,
+  // full→16:9. A fixed height lets banners sit at a comfortable size
+  // regardless of screen width.
+  const heroHeightRaw = String(settings.heroHeight ?? 'auto')
+  const fixedHeight = ['40', '55', '70', '90', '100'].includes(heroHeightRaw)
+  const heightStyle = fixedHeight ? { height: `${heroHeightRaw}vh` } : undefined
 
   const images = resolveImages(
     settings.heroImages,
@@ -121,69 +127,102 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
 
   const mainBranch = data.branches.find((b) => b.isMain) ?? data.branches[0] ?? null
 
-  // ─── image-bg, "full" fit — show the whole banner, no crop ─────────
-  // For pre-made banners that bake in their own text. The image keeps
-  // its 16:9 ratio (the upload hint) via object-contain; any heading /
-  // address / CTA the tenant still wants overlays it centered.
-  if (layout === 'image-bg' && imageFit === 'full' && images.length > 0) {
+  // ─── image-bg layout (cover/full fit × auto/fixed height) ──────────
+  if (layout === 'image-bg' && images.length > 0) {
+    const useContain = imageFit === 'full'
     const hasOverlay =
       showHeading ||
       tagline.length > 0 ||
       shouldRenderCta ||
       (showAddress && !!mainBranch?.address)
-    return (
-      <section className="relative overflow-hidden">
-        <HeroCarousel
-          images={images}
-          autoSlide={autoSlide}
-          durationSec={durationSec}
-          overlayDim={overlayDim && hasOverlay}
-          aspectClass="aspect-[16/9]"
-          objectFit="contain"
-        />
-        {hasOverlay && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-white">
-            {showHeading && (
-              <h1 className="text-2xl font-bold tracking-tight drop-shadow sm:text-4xl lg:text-5xl">
-                {heading}
-              </h1>
-            )}
-            {tagline && (
-              <p className="mx-auto mt-3 max-w-2xl text-sm text-white/90 drop-shadow sm:text-base lg:text-lg">
-                {tagline}
-              </p>
-            )}
-            {showAddress && mainBranch?.address && (
-              <div className="mt-2">
-                <p className="inline-flex items-center gap-1.5 text-xs text-white/80 drop-shadow sm:text-sm">
-                  <MapPin className="h-3.5 w-3.5" />
-                  {mainBranch.address}
-                </p>
-              </div>
-            )}
-            {shouldRenderCta && (
-              <div className="mt-5 sm:mt-6">
-                <a
-                  href={ctaHrefSafe}
-                  target={ctaOpensExternal ? '_blank' : undefined}
-                  rel={ctaOpensExternal ? 'noopener noreferrer' : undefined}
-                  className="inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold shadow-2xl transition hover:scale-105 sm:text-base"
-                  style={{ backgroundColor: theme.brandColor, color: 'white' }}
-                >
-                  {ctaAction === 'whatsapp' && <MessageCircle className="h-5 w-5" />}
-                  {ctaText}
-                  <ArrowRight className="h-4 w-4" />
-                </a>
-              </div>
-            )}
+
+    // The text overlay (shared across every image-bg variant). `drop-shadow`
+    // keeps it legible whether it sits over the photo or a letterbox bar.
+    const overlayInner = (
+      <>
+        {showHeading && (
+          <h1 className="text-3xl font-bold tracking-tight drop-shadow sm:text-5xl lg:text-6xl">
+            {heading}
+          </h1>
+        )}
+        {tagline && (
+          <p className="mx-auto mt-5 max-w-2xl text-base text-white/90 drop-shadow sm:mt-6 sm:text-lg">
+            {tagline}
+          </p>
+        )}
+        {showAddress && mainBranch?.address && (
+          <div className="mt-3">
+            <p className="inline-flex items-center gap-1.5 text-xs text-white/80 drop-shadow sm:text-sm">
+              <MapPin className="h-3.5 w-3.5" />
+              {mainBranch.address}
+            </p>
           </div>
         )}
-      </section>
+        {shouldRenderCta && (
+          <div className="mt-8 sm:mt-10">
+            <a
+              href={ctaHrefSafe}
+              target={ctaOpensExternal ? '_blank' : undefined}
+              rel={ctaOpensExternal ? 'noopener noreferrer' : undefined}
+              className="inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-semibold shadow-2xl transition hover:scale-105 sm:px-8 sm:py-4 sm:text-base"
+              style={{ backgroundColor: theme.brandColor, color: 'white' }}
+            >
+              {ctaAction === 'whatsapp' && <MessageCircle className="h-5 w-5" />}
+              {ctaText}
+              <ArrowRight className="h-4 w-4" />
+            </a>
+          </div>
+        )}
+      </>
     )
-  }
 
-  // ─── image-bg layout ───────────────────────────────────────────────
-  if (layout === 'image-bg' && images.length > 0) {
+    // Fixed height (vh): the photo fills (cover) or fits (full) the band;
+    // overlay is centered. Neutral bg shows through any letterbox.
+    if (fixedHeight) {
+      return (
+        <section
+          className="relative overflow-hidden bg-gray-100 dark:bg-gray-800"
+          style={heightStyle}
+        >
+          <HeroCarousel
+            images={images}
+            autoSlide={autoSlide}
+            durationSec={durationSec}
+            overlayDim={overlayDim && hasOverlay}
+            objectFit={useContain ? 'contain' : 'cover'}
+          />
+          {hasOverlay && (
+            <div className="relative z-10 mx-auto flex h-full max-w-5xl flex-col items-center justify-center px-4 text-center text-white">
+              {overlayInner}
+            </div>
+          )}
+        </section>
+      )
+    }
+
+    // Auto height, "full" fit: whole image at its 16:9 ratio.
+    if (useContain) {
+      return (
+        <section className="relative overflow-hidden">
+          <HeroCarousel
+            images={images}
+            autoSlide={autoSlide}
+            durationSec={durationSec}
+            overlayDim={overlayDim && hasOverlay}
+            aspectClass="aspect-[16/9]"
+            objectFit="contain"
+          />
+          {hasOverlay && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-white">
+              {overlayInner}
+            </div>
+          )}
+        </section>
+      )
+    }
+
+    // Auto height, "cover" fit (default): photo fills behind text-driven
+    // padding height.
     return (
       <section className="relative overflow-hidden">
         <HeroCarousel
@@ -193,42 +232,7 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
           overlayDim={overlayDim}
         />
         <div className="relative mx-auto max-w-5xl px-4 py-20 text-center text-white sm:px-6 sm:py-28 lg:py-36">
-          {showHeading && (
-            <h1 className="text-3xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
-              {heading}
-            </h1>
-          )}
-          {tagline && (
-            <p className="mx-auto mt-5 max-w-2xl text-base text-white/90 sm:mt-6 sm:text-lg">
-              {tagline}
-            </p>
-          )}
-          {showAddress && mainBranch?.address && (
-            // Wrap in a block <div> — without it the inline-flex <p>
-            // and the inline-flex CTA below try to share a single line
-            // and visually overlap.
-            <div className="mt-3">
-              <p className="inline-flex items-center gap-1.5 text-xs text-white/80 sm:text-sm">
-                <MapPin className="h-3.5 w-3.5" />
-                {mainBranch.address}
-              </p>
-            </div>
-          )}
-          {shouldRenderCta && (
-            <div className="mt-8 sm:mt-10">
-              <a
-                href={ctaHrefSafe}
-                target={ctaOpensExternal ? '_blank' : undefined}
-                rel={ctaOpensExternal ? 'noopener noreferrer' : undefined}
-                className="inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-semibold shadow-2xl transition hover:scale-105 sm:px-8 sm:py-4 sm:text-base"
-                style={{ backgroundColor: theme.brandColor, color: 'white' }}
-              >
-                {ctaAction === 'whatsapp' && <MessageCircle className="h-5 w-5" />}
-                {ctaText}
-                <ArrowRight className="h-4 w-4" />
-              </a>
-            </div>
-          )}
+          {overlayInner}
         </div>
       </section>
     )
@@ -441,6 +445,7 @@ export const heroSection: SectionDef = {
     showHeading: true,
     showAddress: true,
     imageFit: 'cover',
+    heroHeight: 'auto',
   },
   fields: [
     {
@@ -466,6 +471,22 @@ export const heroSection: SectionDef = {
         { value: 'full', label: 'Tampilkan utuh (banner)' },
       ],
       default: 'cover',
+    },
+    {
+      key: 'heroHeight',
+      type: 'select',
+      label: 'Tinggi hero',
+      help:
+        'Hanya untuk tampilan "Foto besar". "Otomatis" mengikuti rasio foto (bisa terlalu tinggi di layar lebar). Pilih tinggi tetap agar pas — gabungkan dengan "Tampilkan utuh" untuk banner yang utuh & tidak kebesaran.',
+      options: [
+        { value: 'auto', label: 'Otomatis' },
+        { value: '40', label: 'Pendek (40%)' },
+        { value: '55', label: 'Sedang (55%)' },
+        { value: '70', label: 'Tinggi (70%)' },
+        { value: '90', label: 'Hampir penuh (90%)' },
+        { value: '100', label: 'Layar penuh (100%)' },
+      ],
+      default: 'auto',
     },
     {
       key: 'heroImages',

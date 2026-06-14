@@ -282,7 +282,11 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
                       <img
                         src={p.imageUrl}
                         alt={p.name}
-                        loading="lazy"
+                        // Eager in the editor preview: inside the scaled
+                        // (transform) preview frame, lazy-load's observer
+                        // often never fires, leaving photos blank. Live
+                        // site keeps lazy for performance.
+                        loading={isEditorPreview ? 'eager' : 'lazy'}
                         className="h-full w-full object-contain"
                       />
                     ) : (
