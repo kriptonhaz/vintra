@@ -43,7 +43,7 @@ const TRACK_STATUS_LABEL: Record<string, string> = {
   cancelled: 'Dibatalkan',
 }
 
-const PAYMENT_LABEL: Record<string, string> = {
+export const PAYMENT_LABEL: Record<string, string> = {
   cash: 'Tunai (bayar di tempat)',
   qris: 'QRIS',
   transfer: 'Transfer Bank',
@@ -54,7 +54,7 @@ const PAYMENT_LABEL: Record<string, string> = {
   ovo: 'OVO',
 }
 
-type Storefront = NonNullable<Awaited<ReturnType<typeof getStorefront>>>
+export type Storefront = NonNullable<Awaited<ReturnType<typeof getStorefront>>>
 type StoreProduct = Storefront['products'][number]
 
 /** Page numbers to render — windowed with `null` gaps for ellipsis. */
@@ -422,7 +422,7 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
       </div>
 
       {!isEditorPreview && store?.enabled && (
-        <CartWidget slug={slug} store={store} brandColor={theme.brandColor} />
+        <CartWidget slug={slug} brandColor={theme.brandColor} />
       )}
       {trackOpen && (
         <TrackModal
@@ -765,143 +765,22 @@ function TrackModal({
 
 // ─── Floating cart button + drawer ─────────────────────────────────
 
-type DrawerView = 'cart' | 'checkout' | 'done'
 
 function CartWidget({
   slug,
-  store,
   brandColor,
 }: {
   slug: string
-  store: Storefront
   brandColor: string
 }) {
   const cart = useCart(slug)
   const [open, setOpen] = useState(false)
-  const [view, setView] = useState<DrawerView>('cart')
-
-  // Promo state.
-  const [promoInput, setPromoInput] = useState('')
-  const [promo, setPromo] = useState<{ code: string; amount: number } | null>(
-    null,
-  )
-  const [promoMsg, setPromoMsg] = useState<string | null>(null)
-  const [promoChecking, setPromoChecking] = useState(false)
-
-  // Checkout form.
-  const [name, setName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [fulfillment, setFulfillment] = useState<'delivery' | 'pickup'>(
-    store.shipping.deliveryEnabled ? 'delivery' : 'pickup',
-  )
-  const [address, setAddress] = useState('')
-  const [zoneId, setZoneId] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState(
-    store.payment.methods[0] ?? '',
-  )
-  const [note, setNote] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [submitErr, setSubmitErr] = useState<string | null>(null)
-  const [done, setDone] = useState<Awaited<ReturnType<typeof placeOrder>> | null>(
-    null,
-  )
-
-  // Totals.
-  const subtotal = cart.subtotal
-  const promoAmount = promo ? Math.min(promo.amount, subtotal) : 0
-  const taxBase = Math.max(0, subtotal - promoAmount)
-  const taxAmount = store.tax.apply
-    ? store.tax.lines.reduce(
-        (s, t) => s + Math.round((taxBase * t.percent) / 100),
-        0,
-      )
-    : 0
-  const selectedZone = store.shipping.zones.find((z) => z.id === zoneId)
-  const shippingFee =
-    fulfillment === 'pickup'
-      ? 0
-      : selectedZone
-        ? selectedZone.fee
-        : store.shipping.flatFee
-  const total = taxBase + taxAmount + shippingFee
-
-  async function applyPromo() {
-    if (!promoInput.trim()) return
-    setPromoChecking(true)
-    setPromoMsg(null)
-    try {
-      const res = await validateStorefrontPromo({
-        data: { slug, code: promoInput.trim(), subtotal },
-      })
-      if (res.valid) {
-        setPromo({ code: res.code, amount: res.amount })
-        setPromoMsg(`Promo "${res.name}" diterapkan`)
-      } else {
-        setPromo(null)
-        setPromoMsg(res.message)
-      }
-    } catch {
-      setPromoMsg('Gagal memeriksa promo')
-    } finally {
-      setPromoChecking(false)
-    }
-  }
-
-  async function submit() {
-    setSubmitErr(null)
-    if (!name.trim() || !phone.trim()) {
-      setSubmitErr('Nama dan nomor WhatsApp wajib diisi')
-      return
-    }
-    if (fulfillment === 'delivery' && !address.trim()) {
-      setSubmitErr('Alamat pengiriman wajib diisi')
-      return
-    }
-    if (!paymentMethod) {
-      setSubmitErr('Pilih metode pembayaran')
-      return
-    }
-    setSubmitting(true)
-    try {
-      const res = await placeOrder({
-        data: {
-          slug,
-          fulfillmentType: fulfillment,
-          customerName: name,
-          customerPhone: phone,
-          items: cart.items.map((i) => ({
-            itemId: i.itemId,
-            variantId: i.variantId,
-            qty: i.qty,
-          })),
-          shippingRecipient: fulfillment === 'delivery' ? name : null,
-          shippingPhone: fulfillment === 'delivery' ? phone : null,
-          shippingAddress: fulfillment === 'delivery' ? address : null,
-          shippingZoneId: fulfillment === 'delivery' && zoneId ? zoneId : null,
-          promoCode: promo?.code ?? null,
-          paymentMethod,
-          customerNote: note.trim() || null,
-        },
-      })
-      setDone(res)
-      setView('done')
-      cart.clear()
-    } catch (err) {
-      setSubmitErr(err instanceof Error ? err.message : 'Gagal membuat pesanan')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
   return (
     <>
-      {/* Floating button */}
+      {/* Floating mini-cart button */}
       <button
         type="button"
-        onClick={() => {
-          setOpen(true)
-          if (view === 'done') setView('cart')
-        }}
+        onClick={() => setOpen(true)}
         className="fixed bottom-5 right-5 z-[900] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition hover:scale-105"
         style={{ backgroundColor: brandColor }}
         aria-label="Buka keranjang"
@@ -922,14 +801,9 @@ function CartWidget({
             aria-hidden="true"
           />
           <div className="relative flex h-full w-full max-w-md flex-col bg-white shadow-2xl dark:bg-gray-900">
-            {/* Header */}
             <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
               <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                {view === 'cart'
-                  ? 'Keranjang'
-                  : view === 'checkout'
-                    ? 'Checkout'
-                    : 'Pesanan Dibuat'}
+                Keranjang
               </h3>
               <button
                 type="button"
@@ -940,94 +814,30 @@ function CartWidget({
                 <X className="h-5 w-5" />
               </button>
             </div>
-
             <div className="flex-1 overflow-y-auto px-5 py-4">
-              {view === 'cart' && (
-                <CartView
-                  cart={cart}
-                  brandColor={brandColor}
-                  promoInput={promoInput}
-                  setPromoInput={setPromoInput}
-                  applyPromo={applyPromo}
-                  promo={promo}
-                  promoMsg={promoMsg}
-                  promoChecking={promoChecking}
-                  clearPromo={() => {
-                    setPromo(null)
-                    setPromoMsg(null)
-                    setPromoInput('')
-                  }}
-                />
-              )}
-
-              {view === 'checkout' && (
-                <CheckoutView
-                  store={store}
-                  name={name}
-                  setName={setName}
-                  phone={phone}
-                  setPhone={setPhone}
-                  fulfillment={fulfillment}
-                  setFulfillment={setFulfillment}
-                  address={address}
-                  setAddress={setAddress}
-                  zoneId={zoneId}
-                  setZoneId={setZoneId}
-                  paymentMethod={paymentMethod}
-                  setPaymentMethod={setPaymentMethod}
-                  note={note}
-                  setNote={setNote}
-                />
-              )}
-
-              {view === 'done' && done && (
-                <DoneView done={done} brandColor={brandColor} />
-              )}
+              <CartLineList cart={cart} brandColor={brandColor} />
             </div>
-
-            {/* Footer */}
-            {view !== 'done' && cart.items.length > 0 && (
-              <div className="border-t border-gray-200 px-5 py-4 dark:border-gray-700">
-                <TotalsRows
-                  subtotal={subtotal}
-                  promoAmount={promoAmount}
-                  taxAmount={taxAmount}
-                  shippingFee={fulfillment === 'pickup' ? null : shippingFee}
-                  total={total}
-                />
-                {submitErr && (
-                  <p className="mt-2 text-xs text-red-600">{submitErr}</p>
-                )}
-                {view === 'cart' ? (
-                  <button
-                    type="button"
-                    onClick={() => setView('checkout')}
-                    className="mt-3 w-full rounded-lg px-4 py-3 text-sm font-semibold text-white"
-                    style={{ backgroundColor: brandColor }}
-                  >
-                    Lanjut ke Checkout
-                  </button>
-                ) : (
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setView('cart')}
-                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
-                    >
-                      Kembali
-                    </button>
-                    <button
-                      type="button"
-                      onClick={submit}
-                      disabled={submitting}
-                      className="flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
-                      style={{ backgroundColor: brandColor }}
-                    >
-                      {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                      Buat Pesanan
-                    </button>
-                  </div>
-                )}
+            {cart.items.length > 0 && (
+              <div className="space-y-2 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                <div className="flex justify-between text-sm font-semibold">
+                  <span>Subtotal</span>
+                  <span className="tabular-nums">
+                    {formatRupiah(cart.subtotal)}
+                  </span>
+                </div>
+                <a
+                  href="/checkout"
+                  className="block w-full rounded-lg px-4 py-3 text-center text-sm font-semibold text-white"
+                  style={{ backgroundColor: brandColor }}
+                >
+                  Checkout
+                </a>
+                <a
+                  href="/cart"
+                  className="block w-full rounded-lg border border-gray-300 px-4 py-3 text-center text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                >
+                  Lihat Keranjang
+                </a>
               </div>
             )}
           </div>
@@ -1037,26 +847,14 @@ function CartWidget({
   )
 }
 
-function CartView({
+/** Cart line list (qty steppers + remove). Shared by the mini-cart drawer
+ *  and the /cart page. */
+export function CartLineList({
   cart,
   brandColor,
-  promoInput,
-  setPromoInput,
-  applyPromo,
-  promo,
-  promoMsg,
-  promoChecking,
-  clearPromo,
 }: {
   cart: ReturnType<typeof useCart>
   brandColor: string
-  promoInput: string
-  setPromoInput: (v: string) => void
-  applyPromo: () => void
-  promo: { code: string; amount: number } | null
-  promoMsg: string | null
-  promoChecking: boolean
-  clearPromo: () => void
 }) {
   if (cart.items.length === 0) {
     return (
@@ -1115,51 +913,11 @@ function CartView({
           </div>
         </div>
       ))}
-
-      {/* Promo */}
-      <div className="border-t border-gray-100 pt-3 dark:border-gray-800">
-        {promo ? (
-          <div className="flex items-center justify-between rounded-lg bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
-            <span className="font-medium text-green-700 dark:text-green-300">
-              Promo {promo.code} aktif
-            </span>
-            <button
-              type="button"
-              onClick={clearPromo}
-              className="text-xs text-gray-500 underline"
-            >
-              Hapus
-            </button>
-          </div>
-        ) : (
-          <>
-            <div className="flex gap-2">
-              <input
-                value={promoInput}
-                onChange={(e) => setPromoInput(e.target.value)}
-                placeholder="Kode promo"
-                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
-              />
-              <button
-                type="button"
-                onClick={applyPromo}
-                disabled={promoChecking || !promoInput.trim()}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium disabled:opacity-50 dark:border-gray-600"
-              >
-                Pakai
-              </button>
-            </div>
-            {promoMsg && (
-              <p className="mt-1 text-xs text-gray-500">{promoMsg}</p>
-            )}
-          </>
-        )}
-      </div>
     </div>
   )
 }
 
-function CheckoutView({
+export function CheckoutView({
   store,
   name,
   setName,
@@ -1292,7 +1050,7 @@ function CheckoutView({
   )
 }
 
-function DoneView({
+export function DoneView({
   done,
   brandColor,
 }: {
@@ -1366,7 +1124,7 @@ function DoneView({
   )
 }
 
-function TotalsRows({
+export function TotalsRows({
   subtotal,
   promoAmount,
   taxAmount,
@@ -1484,4 +1242,36 @@ export const shopSection: SectionDef = {
     BG_COLOR_FIELD,
   ],
   Render: ShopRender,
+}
+
+/** Compute promo/tax/shipping/total for the checkout page (mirrors the
+ *  former in-drawer math). Tax follows pos_settings; shipping is the
+ *  selected zone fee, the flat fallback, or 0 for pickup. */
+export function computeCheckoutTotals(
+  store: Storefront,
+  opts: {
+    subtotal: number
+    promoAmount: number
+    fulfillment: 'delivery' | 'pickup'
+    zoneId: string
+  },
+) {
+  const promoAmount = Math.min(opts.promoAmount, opts.subtotal)
+  const taxBase = Math.max(0, opts.subtotal - promoAmount)
+  const taxAmount = store.tax.apply
+    ? store.tax.lines.reduce(
+        (acc, t) => acc + Math.round((taxBase * t.percent) / 100),
+        0,
+      )
+    : 0
+  const zone = store.shipping.zones.find((z) => z.id === opts.zoneId)
+  const shippingFee =
+    opts.fulfillment === 'pickup' ? 0 : zone ? zone.fee : store.shipping.flatFee
+  return {
+    promoAmount,
+    taxBase,
+    taxAmount,
+    shippingFee,
+    total: taxBase + taxAmount + shippingFee,
+  }
 }

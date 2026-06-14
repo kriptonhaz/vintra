@@ -66,7 +66,7 @@ function ProductDetailPage() {
           <span className="max-w-[40vw] truncate">{businessName}</span>
         </a>
         <a
-          href="/"
+          href="/cart"
           className="relative inline-flex h-9 w-9 items-center justify-center rounded-full text-white"
           style={{ backgroundColor: brandColor }}
           aria-label="Keranjang"
@@ -288,7 +288,7 @@ function ProductBuyBox({
 
       {added && (
         <a
-          href="/"
+          href="/cart"
           className="mt-3 block w-full rounded-xl border border-gray-300 py-3 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
           Lihat keranjang &amp; checkout →
