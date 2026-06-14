@@ -544,8 +544,10 @@ function SiteEditorPage() {
           </div>
         )}
 
-        {/* Two-column layout */}
-        <div className="grid gap-6 lg:grid-cols-[5fr_6fr]">
+        {/* Two-column layout. `items-start` keeps the right column at its
+            natural height (not stretched to match the tall left column) so
+            the sticky preview can engage as the editor controls scroll. */}
+        <div className="grid items-start gap-6 lg:grid-cols-[5fr_6fr]">
           {/* LEFT — editor controls */}
           <div className="space-y-4">
             <PublicUrlCard
@@ -635,8 +637,10 @@ function SiteEditorPage() {
             />
           </div>
 
-          {/* RIGHT — live preview */}
-          <div className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-auto">
+          {/* RIGHT — live preview. Sticky below the fixed h-16 header so it
+              stays in view while the editor controls scroll; its own
+              overflow-auto lets a tall preview scroll within the pane. */}
+          <div className="lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-auto">
             <div className="mb-2 flex items-center gap-2 px-1 text-xs uppercase tracking-wide text-gray-500">
               <Eye className="h-3.5 w-3.5" />
               Pratinjau Live

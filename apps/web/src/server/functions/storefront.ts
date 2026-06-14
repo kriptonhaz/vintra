@@ -21,6 +21,7 @@ import {
   inventoryItems,
   inventoryItemUnitPricing,
   inventoryStockBalances,
+  tenantCategories,
   posSettings,
   customers,
   tenantPromotions,
@@ -200,7 +201,8 @@ export const getStorefront = createServerFn()
       settings?.fulfillmentBranchId ?? null,
     )
 
-    // Catalog: explicitly online-curated items.
+    // Catalog: explicitly online-curated items, with their category
+    // name (for the storefront's category filter).
     const itemRows = await db
       .select({
         id: inventoryItems.id,
@@ -208,8 +210,13 @@ export const getStorefront = createServerFn()
         photoKey: inventoryItems.photoKey,
         onlineStockCap: inventoryItems.onlineStockCap,
         shippingWeightGrams: inventoryItems.shippingWeightGrams,
+        category: tenantCategories.name,
       })
       .from(inventoryItems)
+      .leftJoin(
+        tenantCategories,
+        eq(inventoryItems.categoryId, tenantCategories.id),
+      )
       .where(
         and(
           eq(inventoryItems.tenantId, tenant.id),
@@ -247,6 +254,7 @@ export const getStorefront = createServerFn()
       imageUrl: photoByItem.get(r.id) ?? null,
       available: branchId ? (availByItem.get(r.id) ?? 0) : null,
       weightGrams: r.shippingWeightGrams,
+      category: r.category,
     }))
 
     // Payment subset, re-intersected with what POS currently allows.

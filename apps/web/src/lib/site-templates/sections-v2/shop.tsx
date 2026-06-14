@@ -13,7 +13,16 @@
  */
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ShoppingCart, X, Plus, Minus, Trash2, Check, Loader2 } from 'lucide-react'
+import {
+  ShoppingCart,
+  X,
+  Plus,
+  Minus,
+  Trash2,
+  Check,
+  Loader2,
+  Search,
+} from 'lucide-react'
 import { formatRupiah } from '@/lib/currency'
 import { useCart } from '@/lib/storefront/cart-store'
 import {
@@ -46,6 +55,23 @@ const PAYMENT_LABEL: Record<string, string> = {
 
 type Storefront = NonNullable<Awaited<ReturnType<typeof getStorefront>>>
 
+/** Page numbers to render — windowed with `null` gaps for ellipsis. */
+function pageWindow(current: number, total: number): Array<number | null> {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i)
+  const pages = new Set([0, total - 1, current])
+  if (current > 0) pages.add(current - 1)
+  if (current < total - 1) pages.add(current + 1)
+  const sorted = [...pages].sort((a, b) => a - b)
+  const out: Array<number | null> = []
+  let prev = -1
+  for (const p of sorted) {
+    if (prev !== -1 && p - prev > 1) out.push(null)
+    out.push(p)
+    prev = p
+  }
+  return out
+}
+
 function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderProps) {
   const slug = data.tenant.publicSlug
   const heading = (settings.heading as string)?.trim() || 'Belanja Online'
@@ -59,11 +85,72 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
 
   const cart = useCart(slug ?? '')
   const [trackOpen, setTrackOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [activeCategory, setActiveCategory] = useState<string | null>(null)
+  const [page, setPage] = useState(0)
+
+  const showSearch = settings.showSearch !== false
+  const showCategories = settings.showCategories !== false
+  // Desktop column count — mobile stays at 2. Mirrors the Services
+  // section. Default 4 (retail catalogs are usually dense).
+  const gridColumns = (() => {
+    const v = String(settings.gridColumns ?? '4')
+    return v === '2' || v === '3' ? v : '4'
+  })()
+  const gridColsClass =
+    gridColumns === '2'
+      ? ''
+      : gridColumns === '3'
+        ? 'lg:grid-cols-3'
+        : 'lg:grid-cols-3 xl:grid-cols-4'
+  const paginationEnabled = settings.paginationEnabled === true
+  const pageSize = (() => {
+    const n = Number(settings.itemsPerPage)
+    return n === 12 || n === 48 ? n : 24
+  })()
+
+  // Reset to the first page whenever the search/category filter changes
+  // so the visitor isn't stranded on a now-empty page.
+  useEffect(() => {
+    setPage(0)
+  }, [query, activeCategory])
 
   // Live site hides the whole section when the store is off; the editor
   // preview still shows the catalog (with a hint) so layout is visible.
   if (!slug) return null
   if (!isEditorPreview && store && !store.enabled) return null
+
+  // Catalog filtering (client-side). Categories come from the products'
+  // own category names; the active filter + search query narrow the grid.
+  const products = store?.products ?? []
+  const categories = Array.from(
+    new Set(products.map((p) => p.category).filter((c): c is string => !!c)),
+  ).sort((a, b) => a.localeCompare(b, 'id'))
+  const q = query.trim().toLowerCase()
+  const filtered = products.filter(
+    (p) =>
+      (activeCategory == null || p.category === activeCategory) &&
+      (q === '' || p.name.toLowerCase().includes(q)),
+  )
+
+  // Pagination over the filtered list. `safePage` clamps in case the
+  // filter shrank the result below the current page.
+  const totalPages = paginationEnabled
+    ? Math.max(1, Math.ceil(filtered.length / pageSize))
+    : 1
+  const safePage = Math.min(page, totalPages - 1)
+  const visible = paginationEnabled
+    ? filtered.slice(safePage * pageSize, safePage * pageSize + pageSize)
+    : filtered
+
+  const goToPage = (p: number) => {
+    setPage(p)
+    if (typeof document !== 'undefined') {
+      document
+        .getElementById('shop')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
 
   return (
     <section
@@ -110,8 +197,67 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
             Belum ada produk yang dijual online.
           </p>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-            {store.products.map((p) => {
+          <>
+            {(showSearch || (showCategories && categories.length > 0)) && (
+              <div className="mb-6 space-y-4 sm:mb-8">
+                {showSearch && (
+                  <div className="relative mx-auto max-w-md">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="search"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Cari produk…"
+                      className="w-full rounded-full border border-gray-300 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                      style={{ ['--tw-ring-color' as string]: theme.brandColor }}
+                    />
+                  </div>
+                )}
+                {showCategories && categories.length > 0 && (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {[null, ...categories].map((c) => {
+                      const active = activeCategory === c
+                      return (
+                        <button
+                          key={c ?? '__all__'}
+                          type="button"
+                          onClick={() => setActiveCategory(c)}
+                          className="rounded-full border border-gray-300 px-3.5 py-1.5 text-sm font-medium transition hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-600"
+                          style={
+                            active
+                              ? {
+                                  backgroundColor: theme.brandColor,
+                                  borderColor: theme.brandColor,
+                                  color: '#fff',
+                                }
+                              : undefined
+                          }
+                        >
+                          <span
+                            className={
+                              active
+                                ? ''
+                                : 'text-gray-600 dark:text-gray-300'
+                            }
+                          >
+                            {c ?? 'Semua'}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {filtered.length === 0 ? (
+              <p className="py-8 text-center text-sm text-gray-500">
+                Tidak ada produk yang cocok.
+              </p>
+            ) : (
+              <>
+              <div className={`grid grid-cols-2 gap-3 sm:gap-4 ${gridColsClass}`}>
+                {visible.map((p) => {
               const inCart = cart.items.find((i) => i.itemId === p.id)?.qty ?? 0
               const soldOut = p.available != null && p.available <= 0
               const atMax = p.available != null && inCart >= p.available
@@ -176,8 +322,63 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
                   </div>
                 </div>
               )
-            })}
-          </div>
+                })}
+              </div>
+              {paginationEnabled && totalPages > 1 && (
+                <nav
+                  className="mt-8 flex items-center justify-center gap-1.5"
+                  aria-label="Navigasi halaman"
+                >
+                  <button
+                    type="button"
+                    onClick={() => goToPage(safePage - 1)}
+                    disabled={safePage === 0}
+                    className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    Sebelumnya
+                  </button>
+                  {pageWindow(safePage, totalPages).map((p, idx) =>
+                    p === null ? (
+                      <span
+                        key={`gap-${idx}`}
+                        className="px-2 text-sm text-gray-400"
+                      >
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => goToPage(p)}
+                        aria-current={p === safePage ? 'page' : undefined}
+                        className={`min-w-9 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                          p === safePage
+                            ? 'text-white'
+                            : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                        }`}
+                        style={
+                          p === safePage
+                            ? { backgroundColor: theme.brandColor }
+                            : undefined
+                        }
+                      >
+                        {p + 1}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => goToPage(safePage + 1)}
+                    disabled={safePage === totalPages - 1}
+                    className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    Berikutnya
+                  </button>
+                </nav>
+              )}
+              </>
+            )}
+          </>
         )}
       </div>
 
@@ -983,6 +1184,11 @@ export const shopSection: SectionDef = {
   allowMultiple: false,
   defaultSettings: {
     heading: 'Belanja Online',
+    showSearch: true,
+    showCategories: true,
+    gridColumns: '4',
+    paginationEnabled: false,
+    itemsPerPage: '24',
   },
   fields: [
     {
@@ -991,6 +1197,51 @@ export const shopSection: SectionDef = {
       label: 'Judul',
       maxLen: 60,
       default: 'Belanja Online',
+    },
+    {
+      key: 'showSearch',
+      type: 'toggle',
+      label: 'Tampilkan pencarian produk',
+      help: 'Kotak cari untuk memfilter produk berdasarkan nama.',
+      default: true,
+    },
+    {
+      key: 'showCategories',
+      type: 'toggle',
+      label: 'Tampilkan filter kategori',
+      help: 'Tombol kategori (dari kategori inventaris) untuk menyaring produk. Otomatis tersembunyi jika produk belum punya kategori.',
+      default: true,
+    },
+    {
+      key: 'gridColumns',
+      type: 'select',
+      label: 'Jumlah kolom (desktop)',
+      help: 'Mobile selalu 2 kolom. 4 kolom cocok untuk katalog dengan banyak produk.',
+      options: [
+        { value: '2', label: '2 kolom' },
+        { value: '3', label: '3 kolom' },
+        { value: '4', label: '4 kolom (default)' },
+      ],
+      default: '4',
+    },
+    {
+      key: 'paginationEnabled',
+      type: 'toggle',
+      label: 'Aktifkan halaman (pagination)',
+      help: 'Bagi katalog ke beberapa halaman bernomor. Cocok untuk toko dengan banyak produk.',
+      default: false,
+    },
+    {
+      key: 'itemsPerPage',
+      type: 'select',
+      label: 'Produk per halaman',
+      help: 'Hanya berlaku saat pagination aktif.',
+      options: [
+        { value: '12', label: '12 produk' },
+        { value: '24', label: '24 produk (default)' },
+        { value: '48', label: '48 produk' },
+      ],
+      default: '24',
     },
   ],
   Render: ShopRender,

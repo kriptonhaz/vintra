@@ -99,9 +99,15 @@ export function AppLayout({ children, title, user, onLogout }: AppLayoutProps) {
 
         {/* Main area — offset by sidebar width on desktop, except in
             compact mode where the sidebar is hidden. */}
+        {/* `overflow-x-clip` (not `hidden`) prevents horizontal overflow
+            WITHOUT establishing a scroll container — `hidden` forces
+            `overflow-y` to compute to `auto`, which silently breaks
+            `position: sticky` descendants (they'd pin to this never-
+            scrolling wrapper instead of the page). `clip` leaves
+            `overflow-y: visible` so page-scroll sticky works app-wide. */}
         <div
           className={
-            compact ? 'overflow-x-hidden' : 'overflow-x-hidden lg:pl-64'
+            compact ? 'overflow-x-clip' : 'overflow-x-clip lg:pl-64'
           }
         >
           {/* Header */}
