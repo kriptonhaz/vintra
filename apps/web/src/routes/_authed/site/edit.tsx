@@ -743,6 +743,10 @@ function DesktopPreviewFrame({ children }: { children: React.ReactNode }) {
         <div style={{ height: scaledHeight }}>
           <div
             ref={innerRef}
+            // `light-scope` forces the public render to light mode (see
+            // app.css dark variant) so the preview matches the deployed
+            // public page, which is always light.
+            className="light-scope"
             style={{
               width: DESKTOP_WIDTH,
               transform: `scale(${scale})`,

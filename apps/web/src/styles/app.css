@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
-@variant dark (&:where(.dark, .dark *));
+/* Class-based dark mode, but never inside a `.light-scope` subtree.
+   The Situs live preview renders the public page inline within the
+   (possibly dark) admin app; wrapping it in `.light-scope` keeps the
+   preview light so it matches the always-light public site. */
+@variant dark (&:where(.dark, .dark *):not(:where(.light-scope, .light-scope *)));
 
 @theme {
   /* ── Vintra "Midnight Sapphire & Champagne" palette ──────────────
