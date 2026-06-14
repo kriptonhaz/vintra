@@ -16,6 +16,7 @@ import {
 import { usePlatformAdmin } from "@/hooks/use-platform-admin";
 import { usePermissions, useCurrentUser } from "@/hooks/use-permissions";
 import logo from "@/assets/images/logo.png";
+import logoWhite from "@/assets/images/logo-white.png";
 
 /** Modules that are available for free (no subscription required) */
 const FREE_MODULES = new Set(["hpp", "booking", "konten"]);
@@ -580,7 +581,8 @@ export function Sidebar({ isOpen, onClose, onLogout, user, compact }: SidebarPro
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">
-        <img src={logo} alt="Vintra" className="h-8 w-8" />
+        <img src={logo} alt="Vintra" className="h-8 w-8 dark:hidden" />
+        <img src={logoWhite} alt="Vintra" className="hidden h-8 w-8 dark:block" />
         <span className="text-lg font-bold text-gray-900 dark:text-gray-100">
           Vintra
         </span>
