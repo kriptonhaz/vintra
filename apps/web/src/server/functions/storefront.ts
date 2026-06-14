@@ -21,6 +21,8 @@ import {
   inventoryItems,
   inventoryItemUnitPricing,
   inventoryStockBalances,
+  inventoryItemVariants,
+  inventoryItemVariantStock,
   tenantCategories,
   posSettings,
   customers,
@@ -211,6 +213,8 @@ export const getStorefront = createServerFn()
         onlineStockCap: inventoryItems.onlineStockCap,
         shippingWeightGrams: inventoryItems.shippingWeightGrams,
         category: tenantCategories.name,
+        hasVariants: inventoryItems.hasVariants,
+        variantConfig: inventoryItems.variantConfig,
       })
       .from(inventoryItems)
       .leftJoin(
@@ -247,15 +251,100 @@ export const getStorefront = createServerFn()
         }),
     )
 
-    const products = itemRows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      unitPrice: priceByItem.get(r.id) ?? '0',
-      imageUrl: photoByItem.get(r.id) ?? null,
-      available: branchId ? (availByItem.get(r.id) ?? 0) : null,
-      weightGrams: r.shippingWeightGrams,
-      category: r.category,
-    }))
+    // Variants for the variant items, with available stock at the
+    // fulfillment branch. Built into a per-item map.
+    const variantItemIds = itemRows.filter((r) => r.hasVariants).map((r) => r.id)
+    const variantsByItem = new Map<
+      string,
+      Array<{
+        id: string
+        value1: string
+        value2: string
+        label: string
+        price: number
+        available: number | null
+      }>
+    >()
+    if (variantItemIds.length > 0) {
+      const vRows = await db
+        .select({
+          id: inventoryItemVariants.id,
+          itemId: inventoryItemVariants.itemId,
+          value1: inventoryItemVariants.value1,
+          value2: inventoryItemVariants.value2,
+          price: inventoryItemVariants.price,
+          sortOrder: inventoryItemVariants.sortOrder,
+        })
+        .from(inventoryItemVariants)
+        .where(
+          and(
+            inArray(inventoryItemVariants.itemId, variantItemIds),
+            eq(inventoryItemVariants.isActive, true),
+          ),
+        )
+        .orderBy(asc(inventoryItemVariants.sortOrder))
+
+      const vIds = vRows.map((v) => v.id)
+      const stockByVariant = new Map<string, number>()
+      if (branchId && vIds.length > 0) {
+        const sRows = await db
+          .select({
+            variantId: inventoryItemVariantStock.variantId,
+            quantity: inventoryItemVariantStock.quantity,
+          })
+          .from(inventoryItemVariantStock)
+          .where(
+            and(
+              eq(inventoryItemVariantStock.branchId, branchId),
+              inArray(inventoryItemVariantStock.variantId, vIds),
+            ),
+          )
+        for (const s of sRows) stockByVariant.set(s.variantId, Number(s.quantity))
+      }
+
+      for (const v of vRows) {
+        const list = variantsByItem.get(v.itemId) ?? []
+        list.push({
+          id: v.id,
+          value1: v.value1,
+          value2: v.value2,
+          label: v.value2 ? `${v.value1} / ${v.value2}` : v.value1,
+          price: Number(v.price),
+          available: branchId ? (stockByVariant.get(v.id) ?? 0) : null,
+        })
+        variantsByItem.set(v.itemId, list)
+      }
+    }
+
+    const products = itemRows.map((r) => {
+      const variants = r.hasVariants ? (variantsByItem.get(r.id) ?? []) : []
+      // For variant items, the card shows the cheapest variant ("mulai
+      // Rp …") and availability = sum of variant stock.
+      const variantPrices = variants.map((v) => v.price).filter((p) => p > 0)
+      const unitPrice =
+        r.hasVariants && variantPrices.length > 0
+          ? String(Math.min(...variantPrices))
+          : (priceByItem.get(r.id) ?? '0')
+      const available = r.hasVariants
+        ? branchId
+          ? variants.reduce((n, v) => n + (v.available ?? 0), 0)
+          : null
+        : branchId
+          ? (availByItem.get(r.id) ?? 0)
+          : null
+      return {
+        id: r.id,
+        name: r.name,
+        unitPrice,
+        imageUrl: photoByItem.get(r.id) ?? null,
+        available,
+        weightGrams: r.shippingWeightGrams,
+        category: r.category,
+        hasVariants: r.hasVariants,
+        variantConfig: r.hasVariants ? r.variantConfig : null,
+        variants,
+      }
+    })
 
     // Payment subset, re-intersected with what POS currently allows.
     const posMethods = new Set(pos?.defaultPaymentMethods ?? [])
@@ -409,6 +498,7 @@ export const trackOrder = createServerFn({ method: 'POST' })
     const items = await db
       .select({
         nameSnapshot: onlineOrderItems.nameSnapshot,
+        variantLabel: onlineOrderItems.variantLabel,
         qty: onlineOrderItems.qty,
         subtotal: onlineOrderItems.subtotal,
       })
@@ -433,6 +523,7 @@ export const trackOrder = createServerFn({ method: 'POST' })
       cancelReason: order.cancelReason,
       items: items.map((i) => ({
         name: i.nameSnapshot,
+        variantLabel: i.variantLabel,
         qty: Number(i.qty),
         subtotal: Number(i.subtotal),
       })),
@@ -473,6 +564,7 @@ const placeOrderInput = z.object({
     .array(
       z.object({
         itemId: z.string().uuid(),
+        variantId: z.string().uuid().nullable().optional(),
         qty: z.coerce.number().int().min(1),
       }),
     )
@@ -537,6 +629,7 @@ export const placeOrder = createServerFn({ method: 'POST' })
         costPrice: inventoryItems.costPrice,
         onlineStockCap: inventoryItems.onlineStockCap,
         shippingWeightGrams: inventoryItems.shippingWeightGrams,
+        hasVariants: inventoryItems.hasVariants,
       })
       .from(inventoryItems)
       .where(
@@ -551,18 +644,89 @@ export const placeOrder = createServerFn({ method: 'POST' })
     const priceByItem = await firstTierPrices(rows.map((r) => r.id))
     const availByItem = await availableByItem(branchId, rows)
 
+    // Resolve any variant lines: authoritative price + available stock at
+    // the fulfillment branch, keyed by variantId.
+    const variantIds = data.items
+      .map((i) => i.variantId)
+      .filter((v): v is string => !!v)
+    const variantById = new Map<
+      string,
+      { itemId: string; price: number; label: string; available: number }
+    >()
+    if (variantIds.length > 0) {
+      const vRows = await db
+        .select({
+          id: inventoryItemVariants.id,
+          itemId: inventoryItemVariants.itemId,
+          value1: inventoryItemVariants.value1,
+          value2: inventoryItemVariants.value2,
+          price: inventoryItemVariants.price,
+          isActive: inventoryItemVariants.isActive,
+          quantity: inventoryItemVariantStock.quantity,
+        })
+        .from(inventoryItemVariants)
+        .leftJoin(
+          inventoryItemVariantStock,
+          and(
+            eq(inventoryItemVariantStock.variantId, inventoryItemVariants.id),
+            eq(inventoryItemVariantStock.branchId, branchId),
+          ),
+        )
+        .where(
+          and(
+            eq(inventoryItemVariants.tenantId, tenant.id),
+            inArray(inventoryItemVariants.id, variantIds),
+            eq(inventoryItemVariants.isActive, true),
+          ),
+        )
+      for (const v of vRows) {
+        variantById.set(v.id, {
+          itemId: v.itemId,
+          price: Number(v.price),
+          label: v.value2 ? `${v.value1} / ${v.value2}` : v.value1,
+          available: Number(v.quantity ?? 0),
+        })
+      }
+    }
+
     let subtotal = 0
     const lineItems = data.items.map((line) => {
       const item = byId.get(line.itemId)
       if (!item) throw new Error('Produk tidak tersedia lagi')
-      const avail = availByItem.get(item.id) ?? 0
+
+      // Variant items require a valid variant; non-variant items must not
+      // carry one.
+      if (item.hasVariants && !line.variantId)
+        throw new Error(`Pilih variasi untuk "${item.name}"`)
+
+      let unitPrice: number
+      let avail: number
+      let variantId: string | null = null
+      let variantLabel: string | null = null
+
+      if (line.variantId) {
+        const v = variantById.get(line.variantId)
+        if (!v || v.itemId !== item.id)
+          throw new Error(`Variasi untuk "${item.name}" tidak tersedia lagi`)
+        unitPrice = v.price
+        avail = v.available
+        variantId = line.variantId
+        variantLabel = v.label
+      } else {
+        unitPrice = Number(priceByItem.get(item.id) ?? '0')
+        avail = availByItem.get(item.id) ?? 0
+      }
+
+      const label = variantLabel ? `${item.name} (${variantLabel})` : item.name
       if (avail < line.qty)
-        throw new Error(`Stok "${item.name}" tidak cukup (sisa ${avail})`)
-      const unitPrice = Number(priceByItem.get(item.id) ?? '0')
+        throw new Error(`Stok "${label}" tidak cukup (sisa ${avail})`)
+
       const lineSubtotal = unitPrice * line.qty
       subtotal += lineSubtotal
       return {
         itemId: item.id,
+        variantId,
+        variantLabel,
         nameSnapshot: item.name,
         skuSnapshot: item.sku,
         qty: line.qty,
@@ -695,6 +859,8 @@ export const placeOrder = createServerFn({ method: 'POST' })
           tenantId: tenant.id,
           orderId: order.id,
           itemId: li.itemId,
+          variantId: li.variantId,
+          variantLabel: li.variantLabel,
           nameSnapshot: li.nameSnapshot,
           skuSnapshot: li.skuSnapshot,
           qty: li.qty.toString(),

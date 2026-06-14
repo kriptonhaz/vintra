@@ -24,7 +24,7 @@ import {
   Search,
 } from 'lucide-react'
 import { formatRupiah } from '@/lib/currency'
-import { useCart } from '@/lib/storefront/cart-store'
+import { useCart, cartLineKey } from '@/lib/storefront/cart-store'
 import {
   getStorefront,
   validateStorefrontPromo,
@@ -55,6 +55,7 @@ const PAYMENT_LABEL: Record<string, string> = {
 }
 
 type Storefront = NonNullable<Awaited<ReturnType<typeof getStorefront>>>
+type StoreProduct = Storefront['products'][number]
 
 /** Page numbers to render — windowed with `null` gaps for ellipsis. */
 function pageWindow(current: number, total: number): Array<number | null> {
@@ -86,6 +87,7 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
 
   const cart = useCart(slug ?? '')
   const [trackOpen, setTrackOpen] = useState(false)
+  const [pickerProduct, setPickerProduct] = useState<StoreProduct | null>(null)
   const [query, setQuery] = useState('')
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [page, setPage] = useState(0)
@@ -263,9 +265,13 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
               <>
               <div className={`grid grid-cols-2 gap-3 sm:gap-4 ${gridColsClass}`}>
                 {visible.map((p) => {
-              const inCart = cart.items.find((i) => i.itemId === p.id)?.qty ?? 0
+              const isVariant = p.hasVariants && p.variants.length > 0
+              const inCart = cart.items
+                .filter((i) => i.itemId === p.id)
+                .reduce((n, i) => n + i.qty, 0)
               const soldOut = p.available != null && p.available <= 0
-              const atMax = p.available != null && inCart >= p.available
+              const atMax =
+                !isVariant && p.available != null && inCart >= p.available
               return (
                 <div
                   key={p.id}
@@ -294,12 +300,25 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
                       className="mt-1 text-base font-bold"
                       style={{ color: theme.brandColor }}
                     >
-                      {formatRupiah(Number(p.unitPrice))}
+                      {isVariant
+                        ? `mulai ${formatRupiah(Number(p.unitPrice))}`
+                        : formatRupiah(Number(p.unitPrice))}
                     </p>
                     {soldOut ? (
                       <span className="mt-auto pt-2 text-xs font-medium text-gray-400">
                         Stok habis
                       </span>
+                    ) : isVariant ? (
+                      <button
+                        type="button"
+                        disabled={isEditorPreview}
+                        onClick={() => setPickerProduct(p)}
+                        className="mt-auto flex items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ backgroundColor: theme.brandColor }}
+                      >
+                        <Plus className="h-4 w-4" />
+                        {inCart > 0 ? `Pilih variasi (${inCart})` : 'Pilih Variasi'}
+                      </button>
                     ) : (
                       <button
                         type="button"
@@ -308,6 +327,8 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
                           cart.add(
                             {
                               itemId: p.id,
+                              variantId: null,
+                              variantLabel: null,
                               name: p.name,
                               unitPrice: Number(p.unitPrice),
                               imageUrl: p.imageUrl,
@@ -397,7 +418,198 @@ function ShopRender({ data, settings, theme, isEditorPreview }: SectionRenderPro
           onClose={() => setTrackOpen(false)}
         />
       )}
+      {pickerProduct && !isEditorPreview && (
+        <VariantPicker
+          product={pickerProduct}
+          slug={slug}
+          brandColor={theme.brandColor}
+          onClose={() => setPickerProduct(null)}
+        />
+      )}
     </section>
+  )
+}
+
+// ─── Variant picker modal ──────────────────────────────────────────
+
+function VariantPicker({
+  product,
+  slug,
+  brandColor,
+  onClose,
+}: {
+  product: StoreProduct
+  slug: string
+  brandColor: string
+  onClose: () => void
+}) {
+  const cart = useCart(slug)
+  const dims = product.variantConfig?.dims ?? []
+  const [sel, setSel] = useState<(string | null)[]>(() => dims.map(() => null))
+  const [qty, setQty] = useState(1)
+
+  const allPicked = dims.every((_, i) => sel[i] != null)
+  const variant = allPicked
+    ? product.variants.find(
+        (v) =>
+          v.value1 === sel[0] && (dims.length < 2 || v.value2 === (sel[1] ?? '')),
+      )
+    : undefined
+  const available = variant?.available ?? null
+  const outOfStock = variant != null && available != null && available <= 0
+  const maxQty = available ?? null
+  const canAdd = !!variant && !outOfStock
+
+  function add() {
+    if (!variant) return
+    cart.add(
+      {
+        itemId: product.id,
+        variantId: variant.id,
+        variantLabel: variant.label,
+        name: product.name,
+        unitPrice: variant.price,
+        imageUrl: product.imageUrl,
+        maxQty: variant.available,
+        weightGrams: product.weightGrams,
+      },
+      Math.max(1, qty),
+    )
+    onClose()
+  }
+
+  const priceText = variant
+    ? formatRupiah(variant.price)
+    : `mulai ${formatRupiah(Number(product.unitPrice))}`
+
+  return (
+    <div
+      className="fixed inset-0 z-[960] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="fixed inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-gray-900">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            {product.imageUrl && (
+              <img
+                src={product.imageUrl}
+                alt={product.name}
+                className="h-16 w-16 shrink-0 rounded-lg object-contain"
+              />
+            )}
+            <div>
+              <h3 className="font-bold text-gray-900 dark:text-gray-100">
+                {product.name}
+              </h3>
+              <p className="text-sm font-semibold" style={{ color: brandColor }}>
+                {priceText}
+              </p>
+              {variant && available != null && (
+                <p className="text-xs text-gray-500">
+                  {outOfStock ? 'Stok habis' : `Stok: ${available}`}
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Tutup"
+            className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {dims.map((dim, di) => (
+            <div key={di}>
+              <p className="mb-1.5 text-sm font-medium text-gray-700 dark:text-gray-300">
+                {dim.name}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {dim.values.map((val) => {
+                  const active = sel[di] === val
+                  return (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() =>
+                        setSel((prev) =>
+                          prev.map((x, i) => (i === di ? val : x)),
+                        )
+                      }
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium transition hover:border-gray-400 dark:border-gray-600"
+                      style={
+                        active
+                          ? {
+                              backgroundColor: brandColor,
+                              borderColor: brandColor,
+                              color: '#fff',
+                            }
+                          : undefined
+                      }
+                    >
+                      {val}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+
+          {allPicked && !variant && (
+            <p className="text-sm text-gray-500">Kombinasi tidak tersedia.</p>
+          )}
+
+          {/* Quantity */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Jumlah
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setQty((q) => Math.max(1, q - 1))}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 dark:border-gray-600"
+                aria-label="Kurangi"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <span className="w-8 text-center text-sm tabular-nums">{qty}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setQty((q) => (maxQty != null ? Math.min(maxQty, q + 1) : q + 1))
+                }
+                disabled={maxQty != null && qty >= maxQty}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 disabled:opacity-40 dark:border-gray-600"
+                aria-label="Tambah"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={add}
+            disabled={!canAdd}
+            className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ backgroundColor: brandColor }}
+          >
+            <Plus className="h-4 w-4" />
+            {!allPicked
+              ? 'Pilih variasi dulu'
+              : outOfStock
+                ? 'Stok habis'
+                : 'Tambah ke Keranjang'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -505,7 +717,8 @@ function TrackModal({
                   {result.items.map((i, idx) => (
                     <li key={idx} className="flex justify-between">
                       <span className="text-gray-700 dark:text-gray-300">
-                        {i.name} ×{i.qty}
+                        {i.name}
+                        {i.variantLabel ? ` (${i.variantLabel})` : ''} ×{i.qty}
                       </span>
                       <span className="tabular-nums">{formatRupiah(i.subtotal)}</span>
                     </li>
@@ -643,7 +856,11 @@ function CartWidget({
           fulfillmentType: fulfillment,
           customerName: name,
           customerPhone: phone,
-          items: cart.items.map((i) => ({ itemId: i.itemId, qty: i.qty })),
+          items: cart.items.map((i) => ({
+            itemId: i.itemId,
+            variantId: i.variantId,
+            qty: i.qty,
+          })),
           shippingRecipient: fulfillment === 'delivery' ? name : null,
           shippingPhone: fulfillment === 'delivery' ? phone : null,
           shippingAddress: fulfillment === 'delivery' ? address : null,
@@ -838,7 +1055,7 @@ function CartView({
   return (
     <div className="space-y-3">
       {cart.items.map((i) => (
-        <div key={i.itemId} className="flex gap-3">
+        <div key={cartLineKey(i)} className="flex gap-3">
           <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800">
             {i.imageUrl && (
               <img src={i.imageUrl} alt={i.name} className="h-full w-full object-contain" />
@@ -848,13 +1065,16 @@ function CartView({
             <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
               {i.name}
             </p>
+            {i.variantLabel && (
+              <p className="truncate text-xs text-gray-500">{i.variantLabel}</p>
+            )}
             <p className="text-sm font-semibold" style={{ color: brandColor }}>
               {formatRupiah(i.unitPrice)}
             </p>
             <div className="mt-1 flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => cart.setQty(i.itemId, i.qty - 1)}
+                onClick={() => cart.setQty(cartLineKey(i), i.qty - 1)}
                 className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-300 dark:border-gray-600"
                 aria-label="Kurangi"
               >
@@ -863,7 +1083,7 @@ function CartView({
               <span className="w-6 text-center text-sm tabular-nums">{i.qty}</span>
               <button
                 type="button"
-                onClick={() => cart.setQty(i.itemId, i.qty + 1)}
+                onClick={() => cart.setQty(cartLineKey(i), i.qty + 1)}
                 disabled={i.maxQty != null && i.qty >= i.maxQty}
                 className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-300 disabled:opacity-40 dark:border-gray-600"
                 aria-label="Tambah"
@@ -872,7 +1092,7 @@ function CartView({
               </button>
               <button
                 type="button"
-                onClick={() => cart.remove(i.itemId)}
+                onClick={() => cart.remove(cartLineKey(i))}
                 className="ml-auto rounded-md p-1.5 text-gray-400 hover:text-red-600"
                 aria-label="Hapus"
               >

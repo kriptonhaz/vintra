@@ -11,6 +11,10 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react'
 
 export type CartItem = {
   itemId: string
+  /** Chosen variant, when the product has variants. Null otherwise. */
+  variantId: string | null
+  /** Variant label snapshot, e.g. "M / Merah". Null for plain items. */
+  variantLabel: string | null
   name: string
   /** Unit price snapshot at add time (re-priced server-side on order). */
   unitPrice: number
@@ -19,6 +23,14 @@ export type CartItem = {
   /** Max sellable online (branch stock capped by onlineStockCap); null = no cap. */
   maxQty: number | null
   weightGrams: number | null
+}
+
+/** Stable identity of a cart line — variant when present, else the item. */
+export function cartLineKey(i: {
+  itemId: string
+  variantId: string | null
+}): string {
+  return i.variantId ?? i.itemId
 }
 
 const EMPTY: CartItem[] = []
@@ -95,11 +107,12 @@ export function useCart(slug: string) {
   const add = useCallback(
     (item: Omit<CartItem, 'qty'>, qty = 1) => {
       ensureLoaded(slug)
-      const existing = state.items.find((i) => i.itemId === item.itemId)
+      const k = cartLineKey(item)
+      const existing = state.items.find((i) => cartLineKey(i) === k)
       let next: CartItem[]
       if (existing) {
         next = state.items.map((i) =>
-          i.itemId === item.itemId
+          cartLineKey(i) === k
             ? { ...i, ...item, qty: clampQty(i.qty + qty, item.maxQty) }
             : i,
         )
@@ -116,11 +129,11 @@ export function useCart(slug: string) {
   )
 
   const setQty = useCallback(
-    (itemId: string, qty: number) => {
+    (lineKey: string, qty: number) => {
       ensureLoaded(slug)
       const next = state.items
         .map((i) =>
-          i.itemId === itemId ? { ...i, qty: clampQty(qty, i.maxQty) } : i,
+          cartLineKey(i) === lineKey ? { ...i, qty: clampQty(qty, i.maxQty) } : i,
         )
         .filter((i) => i.qty > 0)
       state = { slug, items: next }
@@ -131,9 +144,9 @@ export function useCart(slug: string) {
   )
 
   const remove = useCallback(
-    (itemId: string) => {
+    (lineKey: string) => {
       ensureLoaded(slug)
-      state = { slug, items: state.items.filter((i) => i.itemId !== itemId) }
+      state = { slug, items: state.items.filter((i) => cartLineKey(i) !== lineKey) }
       persist()
       emit()
     },

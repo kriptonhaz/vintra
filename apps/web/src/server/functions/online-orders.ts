@@ -21,6 +21,7 @@ import {
   inventoryItems,
   inventoryMovements,
   inventoryStockBalances,
+  inventoryItemVariantStock,
 } from '@vintra/db/schema'
 import { eq, and, desc, sql, inArray } from 'drizzle-orm'
 import {
@@ -137,6 +138,7 @@ async function moveOrderStock(
   const lines = await tx
     .select({
       itemId: onlineOrderItems.itemId,
+      variantId: onlineOrderItems.variantId,
       qty: onlineOrderItems.qty,
       hppAtSale: onlineOrderItems.hppAtSale,
       linkedHppProductId: inventoryItems.linkedHppProductId,
@@ -146,17 +148,22 @@ async function moveOrderStock(
     .where(eq(onlineOrderItems.orderId, params.orderId))
 
   const now = new Date()
+  const notes =
+    params.direction === 'out'
+      ? `Pesanan online ${params.orderNumber}`
+      : `Pembatalan pesanan ${params.orderNumber}`
+
   for (const line of lines) {
     if (!line.itemId) continue
-    // Recipe-backed items aren't stock-tracked at item level (POS parity).
-    if (line.linkedHppProductId) continue
     const qty = Number(line.qty)
     if (qty <= 0) continue
     const signed = params.direction === 'out' ? -qty : qty
 
+    // Every movement (variant or item-level) is logged for the ledger.
     await tx.insert(inventoryMovements).values({
       tenantId: params.tenantId,
       itemId: line.itemId,
+      variantId: line.variantId,
       branchId: params.branchId,
       movementType: params.direction,
       quantity: qty.toString(),
@@ -164,12 +171,49 @@ async function moveOrderStock(
       reason: 'online_order',
       referenceType: 'online_order',
       referenceId: params.orderId,
-      notes:
-        params.direction === 'out'
-          ? `Pesanan online ${params.orderNumber}`
-          : `Pembatalan pesanan ${params.orderNumber}`,
+      notes,
       performedBy: params.userId,
     })
+
+    if (line.variantId) {
+      // Variant line → move per-variant stock.
+      const [existing] = await tx
+        .select({
+          id: inventoryItemVariantStock.id,
+          quantity: inventoryItemVariantStock.quantity,
+        })
+        .from(inventoryItemVariantStock)
+        .where(
+          and(
+            eq(inventoryItemVariantStock.variantId, line.variantId),
+            eq(inventoryItemVariantStock.branchId, params.branchId),
+          ),
+        )
+        .limit(1)
+      if (existing) {
+        await tx
+          .update(inventoryItemVariantStock)
+          .set({
+            quantity: (Number(existing.quantity) + signed).toString(),
+            lastMovementAt: now,
+            updatedAt: now,
+          })
+          .where(eq(inventoryItemVariantStock.id, existing.id))
+      } else {
+        await tx.insert(inventoryItemVariantStock).values({
+          tenantId: params.tenantId,
+          variantId: line.variantId,
+          branchId: params.branchId,
+          quantity: signed.toString(),
+          lastMovementAt: now,
+        })
+      }
+      continue
+    }
+
+    // Non-variant line. Recipe-backed items aren't stock-tracked at item
+    // level (POS parity) — skip.
+    if (line.linkedHppProductId) continue
 
     const [existing] = await tx
       .select({

@@ -275,6 +275,14 @@ export const onlineOrderItems = pgTable(
     itemId: uuid('item_id').references(() => inventoryItems.id, {
       onDelete: 'set null',
     }),
+    /**
+     * Chosen variant (Phase 2), when the item has variants. FK column
+     * only — defined without a Drizzle reference to avoid a cross-file
+     * cycle; the constraint is added in the migration.
+     */
+    variantId: uuid('variant_id'),
+    /** Variant label snapshot, e.g. "M / Merah". Null for plain items. */
+    variantLabel: text('variant_label'),
     nameSnapshot: text('name_snapshot').notNull(),
     skuSnapshot: text('sku_snapshot'),
     qty: numeric('qty', { precision: 15, scale: 4 }).notNull(),
