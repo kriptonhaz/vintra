@@ -75,6 +75,9 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
   // baked-in text hide the auto heading + address so it doesn't clash.
   const showHeading = settings.showHeading !== false
   const showAddress = settings.showAddress !== false
+  // 'cover' crops the photo to fill (background hero); 'full' shows the
+  // whole image (for pre-made banners that already contain their copy).
+  const imageFit = (settings.imageFit as string) === 'full' ? 'full' : 'cover'
 
   const images = resolveImages(
     settings.heroImages,
@@ -117,6 +120,67 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
   const ctaOpensExternal = ctaAction === 'whatsapp'
 
   const mainBranch = data.branches.find((b) => b.isMain) ?? data.branches[0] ?? null
+
+  // ─── image-bg, "full" fit — show the whole banner, no crop ─────────
+  // For pre-made banners that bake in their own text. The image keeps
+  // its 16:9 ratio (the upload hint) via object-contain; any heading /
+  // address / CTA the tenant still wants overlays it centered.
+  if (layout === 'image-bg' && imageFit === 'full' && images.length > 0) {
+    const hasOverlay =
+      showHeading ||
+      tagline.length > 0 ||
+      shouldRenderCta ||
+      (showAddress && !!mainBranch?.address)
+    return (
+      <section className="relative overflow-hidden">
+        <HeroCarousel
+          images={images}
+          autoSlide={autoSlide}
+          durationSec={durationSec}
+          overlayDim={overlayDim && hasOverlay}
+          aspectClass="aspect-[16/9]"
+          objectFit="contain"
+        />
+        {hasOverlay && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-white">
+            {showHeading && (
+              <h1 className="text-2xl font-bold tracking-tight drop-shadow sm:text-4xl lg:text-5xl">
+                {heading}
+              </h1>
+            )}
+            {tagline && (
+              <p className="mx-auto mt-3 max-w-2xl text-sm text-white/90 drop-shadow sm:text-base lg:text-lg">
+                {tagline}
+              </p>
+            )}
+            {showAddress && mainBranch?.address && (
+              <div className="mt-2">
+                <p className="inline-flex items-center gap-1.5 text-xs text-white/80 drop-shadow sm:text-sm">
+                  <MapPin className="h-3.5 w-3.5" />
+                  {mainBranch.address}
+                </p>
+              </div>
+            )}
+            {shouldRenderCta && (
+              <div className="mt-5 sm:mt-6">
+                <a
+                  href={ctaHrefSafe}
+                  target={ctaOpensExternal ? '_blank' : undefined}
+                  rel={ctaOpensExternal ? 'noopener noreferrer' : undefined}
+                  className="inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold shadow-2xl transition hover:scale-105 sm:text-base"
+                  style={{ backgroundColor: theme.brandColor, color: 'white' }}
+                >
+                  {ctaAction === 'whatsapp' && <MessageCircle className="h-5 w-5" />}
+                  {ctaText}
+                  <ArrowRight className="h-4 w-4" />
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    )
+  }
 
   // ─── image-bg layout ───────────────────────────────────────────────
   if (layout === 'image-bg' && images.length > 0) {
@@ -291,6 +355,7 @@ function HeroCarousel({
   durationSec,
   overlayDim,
   aspectClass,
+  objectFit = 'cover',
 }: {
   images: Array<{ url: string; alt: string }>
   autoSlide: boolean
@@ -299,12 +364,16 @@ function HeroCarousel({
   /** Optional aspect-ratio container — for split layout. Image-bg uses
    *  absolute positioning so it fills its section instead. */
   aspectClass?: string
+  /** 'cover' crops to fill (background hero); 'contain' shows the whole
+   *  image (banner/full mode) on a neutral backdrop. */
+  objectFit?: 'cover' | 'contain'
 }) {
   const { index, setIndex } = useCarousel(images.length, autoSlide, durationSec)
   const isSingle = images.length <= 1
   const positioning = aspectClass
-    ? `relative w-full ${aspectClass}`
+    ? `relative w-full ${aspectClass}${objectFit === 'contain' ? ' bg-gray-100 dark:bg-gray-800' : ''}`
     : 'absolute inset-0 h-full w-full'
+  const fitClass = objectFit === 'contain' ? 'object-contain' : 'object-cover'
 
   return (
     <div className={positioning}>
@@ -322,7 +391,7 @@ function HeroCarousel({
           loading={i === 0 ? 'eager' : 'lazy'}
           fetchPriority={i === 0 ? 'high' : 'auto'}
           decoding="async"
-          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${
+          className={`absolute inset-0 h-full w-full ${fitClass} transition-opacity duration-700 ${
             i === index ? 'opacity-100' : 'opacity-0'
           }`}
         />
@@ -371,6 +440,7 @@ export const heroSection: SectionDef = {
     overlayDim: true,
     showHeading: true,
     showAddress: true,
+    imageFit: 'cover',
   },
   fields: [
     {
@@ -384,6 +454,18 @@ export const heroSection: SectionDef = {
         { value: 'split', label: 'Teks kiri, foto kanan' },
       ],
       default: 'color-bg',
+    },
+    {
+      key: 'imageFit',
+      type: 'select',
+      label: 'Penyesuaian foto',
+      help:
+        'Hanya untuk tampilan "Foto besar". "Penuh (dipotong)" memenuhi layar & memotong tepi — cocok untuk foto latar. "Tampilkan utuh" menampilkan seluruh foto tanpa memotong — cocok untuk banner siap pakai (rasio 16:9).',
+      options: [
+        { value: 'cover', label: 'Penuh, dipotong (foto latar)' },
+        { value: 'full', label: 'Tampilkan utuh (banner)' },
+      ],
+      default: 'cover',
     },
     {
       key: 'heroImages',
