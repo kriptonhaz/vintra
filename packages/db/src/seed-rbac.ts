@@ -53,6 +53,10 @@ const PERMISSIONS: PermissionSeed[] = [
   { key: 'settings.manage', label: 'Kelola pengaturan tenant', module: 'settings' },
   { key: 'members.read', label: 'Lihat anggota', module: 'members' },
   { key: 'members.manage', label: 'Kelola anggota & role', module: 'members' },
+  // Master data — tenant-wide branch/outlet management. No longer
+  // attendance-gated (migration 0070): POS-only and Komplit tenants
+  // manage gudang/outlet locations here too. Owner + Admin by default.
+  { key: 'branches.manage', label: 'Kelola Cabang/Outlet', module: 'master' },
 ]
 
 type RoleSeed = {
