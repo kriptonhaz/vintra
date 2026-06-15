@@ -26,6 +26,7 @@ const RETRIEVAL_TYPES = [
   'loyalty_stamps',
   'order_history',
   'recipe_availability',
+  'online_orders_status',
 ] as const
 const TIERS = ['basic', 'komplit', 'enterprise'] as const
 const TRIGGER_MODES = ['always', 'on_keyword', 'on_customer_match'] as const

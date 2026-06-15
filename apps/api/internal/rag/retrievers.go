@@ -14,16 +14,28 @@ import (
 
 // retrieverFor maps retrieval_type to its implementation.
 var retrieverFor = map[string]Retriever{
-	"inventory_price":     &inventoryPriceRetriever{},
-	"inventory_stock":     &inventoryStockRetriever{},
-	"store_address":       &storeAddressRetriever{},
-	"operating_hours":     &operatingHoursRetriever{},
-	"payment_methods":     &paymentMethodsRetriever{},
-	"promotions":          &promotionsRetriever{},
-	"loyalty_points":      &loyaltyPointsRetriever{},
-	"loyalty_stamps":      &loyaltyStampsRetriever{},
-	"order_history":       &orderHistoryRetriever{},
-	"recipe_availability": &recipeAvailabilityRetriever{},
+	"inventory_price":      &inventoryPriceRetriever{},
+	"inventory_stock":      &inventoryStockRetriever{},
+	"store_address":        &storeAddressRetriever{},
+	"operating_hours":      &operatingHoursRetriever{},
+	"payment_methods":      &paymentMethodsRetriever{},
+	"promotions":           &promotionsRetriever{},
+	"loyalty_points":       &loyaltyPointsRetriever{},
+	"loyalty_stamps":       &loyaltyStampsRetriever{},
+	"order_history":        &orderHistoryRetriever{},
+	"recipe_availability":  &recipeAvailabilityRetriever{},
+	"online_orders_status": &onlineOrdersStatusRetriever{},
+}
+
+// onlineOrderStatusLabel maps an online order status to an Indonesian
+// label for the buyer-facing reply. 'cancelled' is intentionally absent —
+// the retriever query excludes cancelled orders.
+var onlineOrderStatusLabel = map[string]string{
+	"pending":   "Menunggu pembayaran",
+	"confirmed": "Pembayaran dikonfirmasi",
+	"ready":     "Siap diambil",
+	"shipped":   "Sedang dikirim",
+	"completed": "Selesai",
 }
 
 func rowsToMaps(cols []string, vals [][]any) []map[string]any {
@@ -444,6 +456,92 @@ func (r *orderHistoryRetriever) Retrieve(ctx context.Context, db queries.DBTX, t
 	s := Snippet{Text: "Pesanan terakhir: " + strings.Join(parts, ", "), Source: "order_history"}
 	if verbose {
 		s.RawRows = rowsToMaps([]string{"sale_number", "total"}, rawVals)
+	}
+	return []Snippet{s}, nil
+}
+
+// onlineOrdersStatusRetriever looks up the buyer's TOKO ONLINE orders by
+// their WhatsApp number so the AI can answer "where's my order?" even when
+// the buyer lost their order number. Scope: in-progress orders (pending /
+// confirmed / ready / shipped) plus orders completed in the last 14 days.
+// Cancelled orders are excluded. Newest first, capped at 5. Each line
+// carries the order number, status, items, total, and (for shipped) the
+// courier + tracking number.
+type onlineOrdersStatusRetriever struct{}
+
+func (r *onlineOrdersStatusRetriever) Retrieve(ctx context.Context, db queries.DBTX, tenantID pgtype.UUID, remoteJid string, _ []string, _ bool, verbose bool) ([]Snippet, error) {
+	phone := NormalizePhone(remoteJid)
+	if phone == "" {
+		return nil, nil
+	}
+
+	rows, err := db.Query(ctx, `
+		SELECT o.order_number, o.status, o.total::text,
+		       o.courier_name, o.tracking_number,
+		       COALESCE((
+		         SELECT string_agg(
+		           oi.qty::int || 'x ' || oi.name_snapshot ||
+		           CASE WHEN COALESCE(oi.variant_label, '') <> ''
+		                THEN ' (' || oi.variant_label || ')' ELSE '' END,
+		           ', ' ORDER BY oi.created_at)
+		         FROM online_order_items oi WHERE oi.order_id = o.id
+		       ), '') AS items
+		FROM online_orders o
+		WHERE o.tenant_id = $1 AND o.customer_phone = $2
+		  AND (
+		    o.status IN ('pending','confirmed','ready','shipped')
+		    OR (o.status = 'completed'
+		        AND COALESCE(o.completed_at, o.updated_at) >= now() - interval '14 days')
+		  )
+		ORDER BY o.created_at DESC
+		LIMIT 5`, tenantID, phone)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var parts []string
+	var rawVals [][]any
+	i := 0
+	for rows.Next() {
+		var orderNum, status, total, items string
+		var courier, tracking pgtype.Text
+		if err := rows.Scan(&orderNum, &status, &total, &courier, &tracking, &items); err != nil {
+			return nil, err
+		}
+		i++
+		label := onlineOrderStatusLabel[status]
+		if label == "" {
+			label = status
+		}
+		resi := ""
+		if status == "shipped" && tracking.Valid && tracking.String != "" {
+			if courier.Valid && courier.String != "" {
+				resi = fmt.Sprintf(" (resi %s: %s)", courier.String, tracking.String)
+			} else {
+				resi = fmt.Sprintf(" (resi: %s)", tracking.String)
+			}
+		}
+		itemPart := ""
+		if items != "" {
+			itemPart = "; item: " + items
+		}
+		parts = append(parts, fmt.Sprintf("%d) %s — %s%s%s; total %s",
+			i, orderNum, label, resi, itemPart, formatRupiah(total)))
+		if verbose {
+			rawVals = append(rawVals, []any{orderNum, status, total})
+		}
+	}
+	if len(parts) == 0 {
+		return nil, nil
+	}
+
+	s := Snippet{
+		Text:   "Pesanan online pelanggan ini: " + strings.Join(parts, " | "),
+		Source: "online_orders_status",
+	}
+	if verbose {
+		s.RawRows = rowsToMaps([]string{"order_number", "status", "total"}, rawVals)
 	}
 	return []Snippet{s}, nil
 }
