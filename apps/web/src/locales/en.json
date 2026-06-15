@@ -2616,7 +2616,7 @@
       "titleHighlight1": "Easier",
       "titleAnd": " & ",
       "titleHighlight2": "More Profitable",
-      "subtitle": "An all-in-one platform for modern businesses in Indonesia. Calculate Cost of Goods Sold, run the cashier, track stock, manage attendance, and reply to customers automatically with WhatsApp AI — all in one place.",
+      "subtitle": "An all-in-one platform for product and service businesses in Indonesia. Calculate Cost of Goods Sold, run the cashier, track stock, manage bookings & reservations, handle attendance, and reply to customers automatically with WhatsApp AI — all in one place.",
       "ctaPrimary": "Start Free Now",
       "ctaDemo": "See Demo",
       "wedge1": "Free forever for Cost of Goods Sold",
@@ -2630,7 +2630,7 @@
     "features": {
       "eyebrow": "Full Feature Set",
       "title": "Everything Your Business Needs, In One Place",
-      "subtitle": "From Cost of Goods Sold to managing employees — everything your business needs in one platform.",
+      "subtitle": "From Cost of Goods Sold to managing bookings & employees — everything a product or service business needs in one platform.",
       "groupOps": "Daily Operations",
       "groupFinance": "Finance & Team",
       "groupGrowth": "Growth & Customers",
@@ -2711,8 +2711,8 @@
     },
     "whatsapp": {
       "eyebrow": "WhatsApp AI",
-      "title": "Your Store Stays \"Open\" Even While You Sleep",
-      "subtitle": "Answer customer questions, take orders, and send digital receipts automatically over WhatsApp. Our AI learns from your store's recipes & menu.",
+      "title": "Your Business Stays \"Open\" Even While You Sleep",
+      "subtitle": "Answer customer questions, take orders & bookings, and send digital receipts automatically over WhatsApp. Our AI learns from your products, services & business info.",
       "items": [
         {
           "title": "24/7 AI Auto-Reply",
@@ -2792,8 +2792,8 @@
         },
         {
           "name": "Maya Putri",
-          "business": "Florist & Gift Shop",
-          "quote": "I used to run out of flower stock because I forgot to restock. Now Vintra sends automatic low-stock alerts. Huge help!"
+          "business": "Glow Beauty Salon",
+          "quote": "Customer bookings used to clash and therapist attendance was all manual. Now bookings sit neatly in one calendar and the team's attendance is logged automatically. Huge help!"
         }
       ]
     },

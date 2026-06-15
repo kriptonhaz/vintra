@@ -2616,7 +2616,7 @@
       "titleHighlight1": "Lebih Mudah",
       "titleAnd": " & ",
       "titleHighlight2": "Untung",
-      "subtitle": "Platform all-in-one untuk bisnis modern di Indonesia. Hitung HPP, kelola kasir, pantau stok, absensi karyawan, dan balas chat pelanggan otomatis dengan AI WhatsApp — semua dalam satu tempat.",
+      "subtitle": "Platform all-in-one untuk bisnis produk maupun jasa di Indonesia. Hitung HPP, kelola kasir, pantau stok, atur booking & reservasi, absensi karyawan, dan balas chat pelanggan otomatis dengan AI WhatsApp — semua dalam satu tempat.",
       "ctaPrimary": "Mulai Gratis Sekarang",
       "ctaDemo": "Lihat Demo",
       "wedge1": "Gratis selamanya untuk HPP",
@@ -2630,7 +2630,7 @@
     "features": {
       "eyebrow": "Fitur Lengkap",
       "title": "Semua yang Bisnis Anda Butuhkan, Ada di Sini",
-      "subtitle": "Dari hitung HPP sampai kelola karyawan, semua kebutuhan usahamu dalam satu platform.",
+      "subtitle": "Dari hitung HPP sampai kelola booking & karyawan — semua kebutuhan usaha produk maupun jasa dalam satu platform.",
       "groupOps": "Operasional Harian",
       "groupFinance": "Keuangan & Tim",
       "groupGrowth": "Pertumbuhan & Pelanggan",
@@ -2711,8 +2711,8 @@
     },
     "whatsapp": {
       "eyebrow": "WhatsApp AI",
-      "title": "Toko Tetap \"Buka\" Walau Kamu Sedang Tidur",
-      "subtitle": "Jawab pertanyaan pelanggan, terima pesanan, dan kirim struk belanja otomatis lewat WhatsApp. AI kami belajar dari resep & menu tokomu.",
+      "title": "Usaha Tetap \"Buka\" Walau Kamu Sedang Tidur",
+      "subtitle": "Jawab pertanyaan pelanggan, terima pesanan & booking, dan kirim struk otomatis lewat WhatsApp. AI kami belajar dari produk, layanan & info usahamu.",
       "items": [
         {
           "title": "AI Auto-Reply 24/7",
@@ -2792,8 +2792,8 @@
         },
         {
           "name": "Maya Putri",
-          "business": "Florist & Gift Shop",
-          "quote": "Dulu sering kehabisan stok bunga karena lupa restock. Sekarang Vintra kasih notifikasi otomatis kalau stok menipis. Sangat membantu!"
+          "business": "Glow Beauty Salon",
+          "quote": "Dulu jadwal booking pelanggan sering bentrok dan absensi terapis manual. Sekarang booking rapi di satu kalender dan kehadiran tim otomatis tercatat. Sangat membantu!"
         }
       ]
     },
