@@ -31,19 +31,24 @@ type Stage =
   | 'success'
 
 /**
- * Parse Supabase's recovery hash into the access/refresh token pair.
- * The recovery email uses Supabase's legacy implicit flow which dumps
- * the tokens into the URL fragment — our browser client is configured
- * for `flowType: 'pkce'` (the modern OAuth path) and ignores the hash
- * entirely. We have to extract the tokens manually and call setSession
- * ourselves; once that lands, supabase-js treats the page as authed
- * and updateUser({ password }) works.
+ * Parse Supabase's implicit-flow hash into the access/refresh token pair.
+ * Recovery AND invite/signup emails dump the tokens into the URL fragment
+ * (`#access_token=…&refresh_token=…&type=recovery|invite|signup`). Our
+ * browser client is configured for `flowType: 'pkce'` (the OAuth path) and
+ * doesn't reliably consume the implicit hash, so we extract the tokens
+ * ourselves and call setSession; once that lands, supabase-js treats the
+ * page as authed and updateUser({ password }) works.
+ *
+ * We intentionally do NOT filter on `type` — an invite link arrives as
+ * `type=invite` (a new member setting their first password), which the old
+ * recovery-only check ignored, leaving the page to fall back to a stale
+ * session and update the wrong user.
  */
 function parseRecoveryHash(): { accessToken: string; refreshToken: string } | null {
   if (typeof window === 'undefined') return null
   const hash = window.location.hash
-  if (!hash || !hash.includes('type=recovery')) return null
-  const params = new URLSearchParams(hash.slice(1))
+  if (!hash) return null
+  const params = new URLSearchParams(hash.replace(/^#/, ''))
   const accessToken = params.get('access_token')
   const refreshToken = params.get('refresh_token')
   if (!accessToken || !refreshToken) return null
