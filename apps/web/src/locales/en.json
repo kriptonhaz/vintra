@@ -3186,7 +3186,7 @@
     "metaTitle": "Terms of Service — Vintra",
     "metaDescription": "Vintra's terms of service for users of our SaaS platform in Indonesia.",
     "title": "Terms of Service",
-    "effectiveDate": "Effective from 1 April 2026",
+    "effectiveDate": "Effective from 15 June 2026",
     "intro": {
       "heading": "1. Introduction",
       "p1": "Welcome to Vintra. By accessing or using our platform, you agree to be bound by these Terms of Service. Please read this document carefully before using our service.",
@@ -3230,12 +3230,14 @@
       "lead": "You may use the Vintra service for legitimate business purposes. However, you are prohibited from:",
       "items": [
         "Using the Platform for illegal activities or any activity that violates the laws of Indonesia.",
+        "Using the Platform to sell, market, or distribute goods or services that are prohibited or restricted by law — including but not limited to illegal drugs, narcotics, alcoholic beverages, firearms, or any other product whose sale violates applicable regulations.",
         "Reverse engineering, decompiling, or attempting to extract the Platform's source code.",
         "Abusing, disrupting, or damaging Vintra's infrastructure or systems.",
         "Sending spam, harmful content, or content that infringes third-party rights.",
         "Reselling or commercializing the Vintra service without written permission.",
         "Collecting other Users' data without lawful consent."
-      ]
+      ],
+      "note": "Vintra reserves the right to refuse registration, reject, suspend, or permanently terminate any account found to be selling or promoting goods or services prohibited by law, with or without prior notice, and to report such activity to the authorities where required."
     },
     "ip": {
       "heading": "6. Intellectual Property",

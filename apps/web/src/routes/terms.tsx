@@ -143,6 +143,9 @@ function TermsPage() {
             <Section heading={t('terms.usageRules.heading')}>
               <Lead>{t('terms.usageRules.lead')}</Lead>
               <Bullets items={usageRulesItems} />
+              <p className="mt-4 text-base leading-relaxed text-gray-600">
+                {t('terms.usageRules.note')}
+              </p>
             </Section>
 
             <Section heading={t('terms.ip.heading')}>

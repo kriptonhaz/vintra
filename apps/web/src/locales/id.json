@@ -3186,7 +3186,7 @@
     "metaTitle": "Syarat & Ketentuan — Vintra",
     "metaDescription": "Ketentuan layanan Vintra untuk pengguna platform SaaS bisnis di Indonesia.",
     "title": "Syarat & Ketentuan",
-    "effectiveDate": "Berlaku sejak 1 April 2026",
+    "effectiveDate": "Berlaku sejak 15 Juni 2026",
     "intro": {
       "heading": "1. Pendahuluan",
       "p1": "Selamat datang di Vintra. Dengan mengakses atau menggunakan platform kami, Anda menyetujui untuk terikat oleh Syarat & Ketentuan ini. Harap baca dokumen ini dengan seksama sebelum menggunakan layanan kami.",
@@ -3230,12 +3230,14 @@
       "lead": "Anda diizinkan untuk menggunakan layanan Vintra untuk tujuan bisnis yang sah. Namun, Anda dilarang untuk:",
       "items": [
         "Menggunakan Platform untuk aktivitas ilegal atau melanggar peraturan perundang-undangan yang berlaku di Indonesia.",
+        "Menggunakan Platform untuk menjual, memasarkan, atau mendistribusikan barang atau jasa yang dilarang atau dibatasi oleh hukum — termasuk namun tidak terbatas pada narkotika, obat-obatan terlarang, minuman beralkohol, senjata api, atau produk lain yang penjualannya melanggar peraturan yang berlaku.",
         "Melakukan reverse engineering, mendekompilasi, atau mencoba mengekstrak kode sumber Platform.",
         "Menyalahgunakan, mengganggu, atau merusak infrastruktur dan sistem Vintra.",
         "Mengirimkan spam, konten berbahaya, atau konten yang melanggar hak pihak ketiga.",
         "Menjual kembali atau mengkomersilkan layanan Vintra tanpa izin tertulis.",
         "Mengumpulkan data Pengguna lain tanpa persetujuan yang sah."
-      ]
+      ],
+      "note": "Vintra berhak menolak pendaftaran, menolak, menangguhkan, atau menghentikan secara permanen akun mana pun yang terbukti menjual atau mempromosikan barang atau jasa yang dilarang oleh hukum, dengan atau tanpa pemberitahuan terlebih dahulu, serta melaporkan aktivitas tersebut kepada pihak berwenang apabila diperlukan."
     },
     "ip": {
       "heading": "6. Hak Kekayaan Intelektual",
