@@ -34,6 +34,10 @@ const PAGE_SIZE = 30
 interface RowDraft {
   actualQty: string
   note: string
+  // System stock captured when the count was first entered. Frozen here so a
+  // background refetch (window focus, realtime) can't shift the baseline the
+  // discrepancy is measured against while the user is mid-count.
+  baselineStock: number
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -80,11 +84,20 @@ function AdjustPage() {
     setPage(1)
   }, [search, categoryFilter, typeFilter, onlyAdjusted])
 
-  function patch(id: string, p: Partial<RowDraft>) {
-    setDrafts((d) => ({
-      ...d,
-      [id]: { actualQty: '', note: '', ...d[id], ...p },
-    }))
+  function patch(id: string, p: Partial<RowDraft>, baseline = 0) {
+    setDrafts((d) => {
+      const existing = d[id]
+      return {
+        ...d,
+        [id]: {
+          actualQty: existing?.actualQty ?? '',
+          note: existing?.note ?? '',
+          // Set once, on the first keystroke for this row; never overwritten.
+          baselineStock: existing?.baselineStock ?? baseline,
+          ...p,
+        },
+      }
+    })
   }
   function resetRow(id: string) {
     setDrafts((d) => {
@@ -140,6 +153,10 @@ function AdjustPage() {
         .map((it) => ({
           itemId: it.id,
           actualQty: Number(drafts[it.id]!.actualQty),
+          // Frozen baseline captured when counting this row began — the server
+          // measures the count discrepancy against this, not the live balance,
+          // so sales made during the count survive.
+          systemStock: drafts[it.id]!.baselineStock,
           note: drafts[it.id]?.note?.trim() || null,
         }))
       const res = await bulkRecordStockOpname({
@@ -155,9 +172,13 @@ function AdjustPage() {
       setDrafts({})
       // The items list + cashier read stock via React Query (not route
       // loaders), so router.invalidate() alone leaves them stale until a
-      // manual refresh. Invalidate those caches explicitly too.
-      queryClient.invalidateQueries({ queryKey: ['inventory', 'items'] })
+      // manual refresh. Refresh every cache that reads stock balances: this
+      // page's own count sheet, the overview, items list, movements ledger,
+      // and the POS cashier view.
       queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-adjust'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'overview'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'items'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'movements'] })
       queryClient.invalidateQueries({ queryKey: ['pos'] })
       await router.invalidate()
     } catch (err) {
@@ -274,7 +295,10 @@ function AdjustPage() {
                 const draft = drafts[it.id]
                 const raw = draft?.actualQty ?? ''
                 const filledIn = raw.trim() !== '' && !Number.isNaN(Number(raw))
-                const delta = filledIn ? Number(raw) - it.systemStock : 0
+                // Compare against the frozen baseline once counting starts so
+                // the displayed delta matches what the server will apply.
+                const baseline = draft?.baselineStock ?? it.systemStock
+                const delta = filledIn ? Number(raw) - baseline : 0
                 return (
                   <TableRow key={it.id}>
                     <TableCell className="font-medium">
@@ -290,7 +314,7 @@ function AdjustPage() {
                       {it.baseUnitLabel}
                     </TableCell>
                     <TableCell className="text-right text-sm">
-                      {formatNumberID(it.systemStock)}
+                      {formatNumberID(baseline)}
                     </TableCell>
                     <TableCell>
                       <Input
@@ -301,7 +325,7 @@ function AdjustPage() {
                         placeholder="Stok sebenarnya"
                         value={raw}
                         onChange={(e) =>
-                          patch(it.id, { actualQty: e.target.value })
+                          patch(it.id, { actualQty: e.target.value }, it.systemStock)
                         }
                       />
                       {filledIn && delta !== 0 && (

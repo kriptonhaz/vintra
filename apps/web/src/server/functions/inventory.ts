@@ -2270,11 +2270,19 @@ export const getStockAdjustmentData = createServerFn({ method: 'POST' })
   })
 
 /**
- * Apply a batch of stock counts ("opname"). For each row the actual
- * counted quantity replaces the balance; the delta from the LIVE
- * balance (re-read here, not trusted from the page) is written as an
- * in/out movement tagged `reason: 'opname'`. Zero-delta and
- * recipe-backed rows are skipped.
+ * Apply a batch of stock counts ("opname"). The count discrepancy is the
+ * difference between the actual counted quantity and the system stock the
+ * counter SAW when the sheet was generated (`systemStock`) — NOT the live
+ * balance. That discrepancy is then applied on top of the live balance:
+ *
+ *     newBalance = liveBalance + (actualQty - systemStock)
+ *
+ * This is critical when selling continues on another device during the
+ * count: an absolute overwrite to `actualQty` would silently erase every
+ * sale made between the count and the save, drifting stock on each opname.
+ * By applying only the counted delta, concurrent sale/in movements survive.
+ * The applied delta is written as an in/out movement tagged
+ * `reason: 'opname'`. Zero-delta and recipe-backed rows are skipped.
  */
 export const bulkRecordStockOpname = createServerFn({ method: 'POST' })
   .inputValidator(
@@ -2285,6 +2293,9 @@ export const bulkRecordStockOpname = createServerFn({ method: 'POST' })
           z.object({
             itemId: z.string().uuid(),
             actualQty: z.coerce.number().min(0),
+            // System stock shown on the count sheet — the baseline the
+            // physical count was compared against.
+            systemStock: z.coerce.number().min(0),
             note: z.string().max(500).optional().nullable(),
           }),
         )
@@ -2340,8 +2351,20 @@ export const bulkRecordStockOpname = createServerFn({ method: 'POST' })
           )
           .limit(1)
         const current = bal ? Number(bal.quantity) : 0
-        const delta = adj.actualQty - current
-        if (delta === 0) {
+        // Discrepancy found by the physical count, measured against the
+        // baseline the counter saw — NOT the live balance.
+        const countedDelta = adj.actualQty - adj.systemStock
+        if (countedDelta === 0) {
+          skipped++
+          continue
+        }
+        // Apply the discrepancy on top of the live balance, clamping at 0 so
+        // concurrent sales recorded during the count can't be erased or push
+        // the balance negative. An absolute overwrite to `actualQty` would
+        // silently wipe every sale made between the count and the save.
+        const newBalance = Math.max(0, current + countedDelta)
+        const applied = newBalance - current
+        if (applied === 0) {
           skipped++
           continue
         }
@@ -2350,8 +2373,8 @@ export const bulkRecordStockOpname = createServerFn({ method: 'POST' })
           tenantId: auth.tenantId,
           itemId: adj.itemId,
           branchId: data.branchId,
-          movementType: delta > 0 ? 'in' : 'out',
-          quantity: Math.abs(delta).toString(),
+          movementType: applied > 0 ? 'in' : 'out',
+          quantity: Math.abs(applied).toString(),
           reason: 'opname',
           referenceType: 'manual',
           notes: adj.note?.trim() || null,
@@ -2362,7 +2385,7 @@ export const bulkRecordStockOpname = createServerFn({ method: 'POST' })
           await tx
             .update(inventoryStockBalances)
             .set({
-              quantity: adj.actualQty.toString(),
+              quantity: newBalance.toString(),
               lastMovementAt: performedAt,
               updatedAt: performedAt,
             })
@@ -2372,7 +2395,7 @@ export const bulkRecordStockOpname = createServerFn({ method: 'POST' })
             tenantId: auth.tenantId,
             itemId: adj.itemId,
             branchId: data.branchId,
-            quantity: adj.actualQty.toString(),
+            quantity: newBalance.toString(),
             lastMovementAt: performedAt,
           })
         }

@@ -960,6 +960,13 @@
       "when": 1786795200000,
       "tag": "0136_rag_online_orders_keywords",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1786881600000,
+      "tag": "0137_inventory_realtime_rls",
+      "breakpoints": true
     }
   ]
 }

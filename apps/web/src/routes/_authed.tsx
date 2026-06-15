@@ -6,6 +6,7 @@ import { AppLayout } from '@/components/layout/app-layout'
 import { ImpersonationBanner } from '@/components/layout/impersonation-banner'
 import { BranchProvider } from '@/hooks/use-branch'
 import { useAuth } from '@/hooks/use-auth'
+import { useInventoryRealtime } from '@/hooks/use-inventory-realtime'
 import { ROUTE_TITLE_KEYS } from '@/lib/constants'
 
 export const Route = createFileRoute('/_authed')({
@@ -33,6 +34,10 @@ function AuthedLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+
+  // Stream live inventory changes to this tab for the whole session, so stock
+  // edited on another device shows up here without a manual refresh.
+  useInventoryRealtime(user.tenant?.id)
 
   // Prime the ['current-user'] query cache with the loader-resolved user.
   // Without this, the sidebar's `useCurrentUser()` hook starts in pending
