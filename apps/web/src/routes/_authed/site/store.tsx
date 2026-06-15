@@ -85,6 +85,9 @@ function StoreSettingsPage() {
     s?.adminNotifyInstanceId ?? '',
   )
   const [applyTax, setApplyTax] = React.useState(s?.applyTax ?? true)
+  const [reviewsEnabled, setReviewsEnabled] = React.useState(
+    s?.reviewsEnabled ?? true,
+  )
   const [checkoutNote, setCheckoutNote] = React.useState(s?.checkoutNote ?? '')
 
   const [zones, setZones] = React.useState<ZoneRow[]>(() =>
@@ -114,6 +117,7 @@ function StoreSettingsPage() {
           waConfirmPhone: waPhone.trim() ? waPhone : null,
           adminNotifyInstanceId: notifyInstance || null,
           applyTax,
+          reviewsEnabled,
           checkoutNote: checkoutNote.trim() ? checkoutNote : null,
         },
       })
@@ -437,6 +441,23 @@ function StoreSettingsPage() {
                 <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
                   Ikuti pengaturan pajak di Pengaturan Kasir untuk pesanan
                   online.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={reviewsEnabled}
+                onChange={(e) => setReviewsEnabled(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300"
+              />
+              <span className="text-sm">
+                <span className="block font-medium text-gray-900 dark:text-gray-100">
+                  Ulasan & rating produk
+                </span>
+                <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
+                  Pembeli bisa memberi bintang & ulasan setelah pesanan
+                  selesai. Matikan untuk menyembunyikan ulasan di toko.
                 </span>
               </span>
             </label>

@@ -293,23 +293,26 @@ export const getStorefrontProduct = createServerFn()
     ).filter((u): u is string => !!u)
     const images = [...(imageUrl ? [imageUrl] : []), ...galleryUrls]
 
-    // Visible reviews (newest first) + summary for this product.
-    const reviewRows = await db
-      .select({
-        customerName: onlineProductReviews.customerName,
-        rating: onlineProductReviews.rating,
-        comment: onlineProductReviews.comment,
-        createdAt: onlineProductReviews.createdAt,
-      })
-      .from(onlineProductReviews)
-      .where(
-        and(
-          eq(onlineProductReviews.itemId, item.id),
-          eq(onlineProductReviews.isHidden, false),
-        ),
-      )
-      .orderBy(desc(onlineProductReviews.createdAt))
-      .limit(50)
+    // Visible reviews (newest first) + summary for this product — only
+    // when the tenant has reviews turned on.
+    const reviewRows = settings.reviewsEnabled
+      ? await db
+          .select({
+            customerName: onlineProductReviews.customerName,
+            rating: onlineProductReviews.rating,
+            comment: onlineProductReviews.comment,
+            createdAt: onlineProductReviews.createdAt,
+          })
+          .from(onlineProductReviews)
+          .where(
+            and(
+              eq(onlineProductReviews.itemId, item.id),
+              eq(onlineProductReviews.isHidden, false),
+            ),
+          )
+          .orderBy(desc(onlineProductReviews.createdAt))
+          .limit(50)
+      : []
     const reviewCount = reviewRows.length
     const ratingAvg =
       reviewCount > 0
@@ -326,6 +329,7 @@ export const getStorefrontProduct = createServerFn()
         description: item.notes?.trim() || null,
         imageUrl,
         images,
+        reviewsEnabled: settings.reviewsEnabled,
         ratingAvg,
         reviewCount,
         reviews: reviewRows.map((r) => ({
@@ -590,10 +594,11 @@ export const getStorefront = createServerFn()
       }
     }
 
-    // Rating summary per item (visible reviews only) for the cards.
+    // Rating summary per item (visible reviews only) for the cards —
+    // skipped entirely when the tenant turned reviews off.
     const ratingByItem = new Map<string, { avg: number; count: number }>()
     const allItemIds = itemRows.map((r) => r.id)
-    if (allItemIds.length > 0) {
+    if (settings?.reviewsEnabled && allItemIds.length > 0) {
       const aggRows = await db
         .select({
           itemId: onlineProductReviews.itemId,
@@ -810,10 +815,19 @@ export const trackOrder = createServerFn({ method: 'POST' })
       .from(onlineOrderItems)
       .where(eq(onlineOrderItems.orderId, order.id))
 
-    // Reviews are only offered once the buyer has the product
-    // (completed order). Mark which items they've already reviewed so the
-    // UI can hide the form for those.
-    const canReview = order.status === 'completed'
+    // Reviews are only offered once the buyer has the product (completed
+    // order) AND the tenant has reviews enabled. Mark which items they've
+    // already reviewed so the UI can hide the form for those.
+    let reviewsOn = false
+    if (order.status === 'completed') {
+      const [s] = await db
+        .select({ reviewsEnabled: storefrontSettings.reviewsEnabled })
+        .from(storefrontSettings)
+        .where(eq(storefrontSettings.tenantId, tenant.id))
+        .limit(1)
+      reviewsOn = s?.reviewsEnabled ?? false
+    }
+    const canReview = order.status === 'completed' && reviewsOn
     let reviewedItemIds = new Set<string>()
     if (canReview) {
       const existing = await db
@@ -869,6 +883,15 @@ export const submitProductReview = createServerFn({ method: 'POST' })
     if (!tenant) return { ok: false as const, message: 'Toko tidak ditemukan' }
     const phone = normalizePhone(data.phone)
     if (!phone) return { ok: false as const, message: 'Nomor tidak valid' }
+
+    const [settings] = await db
+      .select({ reviewsEnabled: storefrontSettings.reviewsEnabled })
+      .from(storefrontSettings)
+      .where(eq(storefrontSettings.tenantId, tenant.id))
+      .limit(1)
+    if (!settings?.reviewsEnabled) {
+      return { ok: false as const, message: 'Ulasan tidak aktif untuk toko ini' }
+    }
 
     const [order] = await db
       .select({

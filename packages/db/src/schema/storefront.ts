@@ -96,6 +96,12 @@ export const storefrontSettings = pgTable('storefront_settings', {
   ),
   /** Mirror `pos_settings.taxes` onto online orders when true. */
   applyTax: boolean('apply_tax').notNull().default(true),
+  /**
+   * Whether buyers can rate + review products (and reviews show on the
+   * storefront). When false: no review forms on /track, no rating
+   * summary on product pages or catalog cards. Default on.
+   */
+  reviewsEnabled: boolean('reviews_enabled').notNull().default(true),
   /** Free-form note shown on the checkout + confirmation page. */
   checkoutNote: text('checkout_note'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

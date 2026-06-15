@@ -98,13 +98,15 @@ function ProductDetailPage() {
           />
         </div>
 
-        {/* Reviews */}
-        <ProductReviews
-          ratingAvg={product.ratingAvg}
-          reviewCount={product.reviewCount}
-          reviews={product.reviews}
-          brandColor={brandColor}
-        />
+        {/* Reviews — only when the store has reviews enabled */}
+        {product.reviewsEnabled && (
+          <ProductReviews
+            ratingAvg={product.ratingAvg}
+            reviewCount={product.reviewCount}
+            reviews={product.reviews}
+            brandColor={brandColor}
+          />
+        )}
       </main>
 
       <footer className="border-t border-gray-100 py-6 text-center text-xs text-gray-400">

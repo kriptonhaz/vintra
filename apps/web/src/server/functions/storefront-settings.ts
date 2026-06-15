@@ -118,6 +118,7 @@ const updateInput = z.object({
   waConfirmPhone: z.string().max(25).nullable().optional(),
   adminNotifyInstanceId: z.string().uuid().nullable().optional(),
   applyTax: z.boolean().optional(),
+  reviewsEnabled: z.boolean().optional(),
   checkoutNote: z.string().max(1000).nullable().optional(),
 })
 
@@ -159,6 +160,8 @@ export const updateStorefrontSettings = createServerFn({ method: 'POST' })
     if (data.adminNotifyInstanceId !== undefined)
       set.adminNotifyInstanceId = data.adminNotifyInstanceId
     if (data.applyTax !== undefined) set.applyTax = data.applyTax
+    if (data.reviewsEnabled !== undefined)
+      set.reviewsEnabled = data.reviewsEnabled
     if (data.checkoutNote !== undefined)
       set.checkoutNote = data.checkoutNote?.trim() ? data.checkoutNote : null
 

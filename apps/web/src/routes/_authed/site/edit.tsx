@@ -16,6 +16,7 @@
  * preview, and dodges all the postMessage plumbing.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -73,6 +74,8 @@ import {
   Globe,
   Copy,
   Check,
+  Monitor,
+  Smartphone,
 } from 'lucide-react'
 
 // ─── Route ───────────────────────────────────────────────────────────
@@ -323,6 +326,9 @@ function SiteEditorPage() {
   const [addPickerOpen, setAddPickerOpen] = useState(false)
   const [presetPickerOpen, setPresetPickerOpen] = useState(false)
   const [pendingPresetId, setPendingPresetId] = useState<string | null>(null)
+  const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>(
+    'desktop',
+  )
 
   function mutateSettings(fn: (prev: SiteSettingsV2) => SiteSettingsV2) {
     setSettings((prev) => fn(prev))
@@ -641,11 +647,45 @@ function SiteEditorPage() {
               stays in view while the editor controls scroll; its own
               overflow-auto lets a tall preview scroll within the pane. */}
           <div className="lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-auto">
-            <div className="mb-2 flex items-center gap-2 px-1 text-xs uppercase tracking-wide text-gray-500">
-              <Eye className="h-3.5 w-3.5" />
-              Pratinjau Live
+            <div className="mb-2 flex items-center justify-between px-1">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500">
+                <Eye className="h-3.5 w-3.5" />
+                Pratinjau Live
+              </div>
+              {/* Desktop / mobile preview toggle. Mobile renders inside an
+                  iframe so CSS breakpoints respond to the device width. */}
+              <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-0.5 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setPreviewDevice('desktop')}
+                  aria-label="Pratinjau desktop"
+                  aria-pressed={previewDevice === 'desktop'}
+                  className={cn(
+                    'rounded-md p-1.5 transition',
+                    previewDevice === 'desktop'
+                      ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
+                      : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                  )}
+                >
+                  <Monitor className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDevice('mobile')}
+                  aria-label="Pratinjau mobile"
+                  aria-pressed={previewDevice === 'mobile'}
+                  className={cn(
+                    'rounded-md p-1.5 transition',
+                    previewDevice === 'mobile'
+                      ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
+                      : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                  )}
+                >
+                  <Smartphone className="h-4 w-4" />
+                </button>
+              </div>
             </div>
-            <DesktopPreviewFrame>
+            <PreviewFrame device={previewDevice}>
               <PublicSiteRenderV2
                 settings={settings}
                 data={renderData}
@@ -654,7 +694,7 @@ function SiteEditorPage() {
                 }
                 isEditorPreview
               />
-            </DesktopPreviewFrame>
+            </PreviewFrame>
             <p className="mt-2 px-1 text-xs text-gray-500">
               Tampilan persis seperti yang dilihat customer di{' '}
               {publicSlug ? `${publicSlug}.vintra.my.id` : 'subdomain Anda nanti'}.
@@ -706,57 +746,96 @@ function SiteEditorPage() {
  * keystroke as sections are edited), so the outer box always hugs the
  * scaled height with no dead space.
  */
-function DesktopPreviewFrame({ children }: { children: React.ReactNode }) {
+function PreviewFrame({
+  device,
+  children,
+}: {
+  device: 'desktop' | 'mobile'
+  children: React.ReactNode
+}) {
   const DESKTOP_WIDTH = 1280
-  const containerRef = useRef<HTMLDivElement>(null)
-  const innerRef = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(0.5)
-  const [scaledHeight, setScaledHeight] = useState(0)
+  const MOBILE_WIDTH = 390
+  const frameWidth = device === 'mobile' ? MOBILE_WIDTH : DESKTOP_WIDTH
 
+  const containerRef = useRef<HTMLDivElement>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const [mountNode, setMountNode] = useState<HTMLElement | null>(null)
+  const [scale, setScale] = useState(0.5)
+  const [contentHeight, setContentHeight] = useState(600)
+
+  // Render the preview inside an iframe so CSS media queries respond to
+  // the simulated device width (an inline div at 390px would still see
+  // the real desktop viewport and show the desktop layout). We clone the
+  // app's stylesheets into the iframe and portal the React tree into its
+  // body — so the preview keeps sharing editor state, no postMessage.
+  function initDoc(doc: Document) {
+    doc.head.innerHTML = ''
+    document
+      .querySelectorAll('style, link[rel="stylesheet"]')
+      .forEach((node) => doc.head.appendChild(node.cloneNode(true)))
+    doc.documentElement.style.background = '#ffffff'
+    doc.body.style.margin = '0'
+    // Public page is always light; the iframe html has no `.dark` class,
+    // but keep light-scope as belt-and-suspenders.
+    doc.body.className = 'light-scope'
+    setMountNode(doc.body)
+  }
+
+  function handleLoad() {
+    const doc = iframeRef.current?.contentDocument
+    if (doc) initDoc(doc)
+  }
+
+  // about:blank may already be ready before onLoad fires in some browsers.
+  useEffect(() => {
+    const doc = iframeRef.current?.contentDocument
+    if (doc && doc.readyState === 'complete' && !mountNode) initDoc(doc)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Recompute scale (fit width, never upscale) + track content height.
   useEffect(() => {
     const container = containerRef.current
-    const inner = innerRef.current
-    if (!container || !inner) return
-
+    if (!container || !mountNode) return
     const update = () => {
-      const nextScale = container.clientWidth / DESKTOP_WIDTH
-      setScale(nextScale)
-      setScaledHeight(inner.scrollHeight * nextScale)
+      const next = Math.min(container.clientWidth / frameWidth, 1)
+      setScale(next)
+      setContentHeight(mountNode.scrollHeight)
     }
-
     update()
     const ro = new ResizeObserver(update)
     ro.observe(container)
-    ro.observe(inner)
+    ro.observe(mountNode)
     return () => ro.disconnect()
-  }, [])
+  }, [mountNode, frameWidth, device])
 
   return (
     <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-      {/* Browser chrome — sells the "desktop window" feel. */}
+      {/* Browser chrome — sells the "window" feel. */}
       <div className="flex items-center gap-1.5 border-b border-gray-200 bg-gray-100 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
         <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
         <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
       </div>
-      <div ref={containerRef} className="overflow-hidden">
-        <div style={{ height: scaledHeight }}>
-          <div
-            ref={innerRef}
-            // `light-scope` forces the public render to light mode (see
-            // app.css dark variant) so the preview matches the deployed
-            // public page, which is always light.
-            className="light-scope"
+      <div ref={containerRef} className="flex justify-center overflow-hidden">
+        <div
+          style={{ height: contentHeight * scale, width: frameWidth * scale }}
+        >
+          <iframe
+            ref={iframeRef}
+            title="Pratinjau situs"
+            onLoad={handleLoad}
             style={{
-              width: DESKTOP_WIDTH,
+              width: frameWidth,
+              height: contentHeight,
+              border: 0,
               transform: `scale(${scale})`,
               transformOrigin: 'top left',
             }}
-          >
-            {children}
-          </div>
+          />
         </div>
       </div>
+      {mountNode && createPortal(children, mountNode)}
     </div>
   )
 }
