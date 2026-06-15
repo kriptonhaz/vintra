@@ -25,6 +25,7 @@ import {
   parseDataUrl,
 } from '@/lib/s3-storage'
 import { buildMemberInviteEmail, sendEmail } from '../email'
+import { getAppOrigin } from '../lib/app-url'
 
 function getSupabaseServer() {
   return createClient(
@@ -316,7 +317,7 @@ export const inviteTenantMember = createServerFn({ method: 'POST' })
       // empty "{}" error). Mirror registerWithEmail/sendPasswordResetEmail:
       // generate the action link ourselves (Supabase sends NO email) and
       // deliver it via our Brevo pipeline.
-      const appUrl = process.env.VITE_APP_URL ?? 'http://localhost:3000'
+      const appUrl = getAppOrigin()
       const fullName =
         [data.firstName, data.lastName].filter(Boolean).join(' ').trim() ||
         data.email

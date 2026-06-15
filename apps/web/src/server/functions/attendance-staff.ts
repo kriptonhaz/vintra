@@ -16,6 +16,7 @@ import { requirePermission } from '../middleware/auth'
 import { requireActiveModule } from '../middleware/module-access'
 import { coerceStorablePhone } from '@vintra/shared'
 import { buildMemberInviteEmail, sendEmail } from '../email'
+import { getAppOrigin } from '../lib/app-url'
 
 const MODULE_KEY = 'attendance'
 
@@ -534,7 +535,7 @@ export const inviteStaff = createServerFn({ method: 'POST' })
       // generate the action link ourselves (Supabase sends NO email) and
       // deliver it via our Brevo pipeline.
       if (!user) {
-        const appUrl = process.env.VITE_APP_URL ?? 'http://localhost:3000'
+        const appUrl = getAppOrigin()
         const fullName =
           [data.firstName, data.lastName].filter(Boolean).join(' ').trim() ||
           data.email

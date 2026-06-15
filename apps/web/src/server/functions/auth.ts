@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { createClient } from '@supabase/supabase-js'
 import { getRequest, setCookie } from '@tanstack/react-start/server'
+import { getAppOrigin } from '../lib/app-url'
 import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
@@ -685,7 +686,7 @@ export const sendPasswordResetEmail = createServerFn({ method: 'POST' })
   .inputValidator(z.object({ email: z.string().email() }))
   .handler(async ({ data }) => {
     const supabase = getSupabaseServer()
-    const appUrl = process.env.VITE_APP_URL ?? 'http://localhost:3000'
+    const appUrl = getAppOrigin()
     const redirectTo = `${appUrl}/auth/reset-password`
 
     const { data: linkData, error: linkError } =
@@ -725,7 +726,7 @@ export const registerWithEmail = createServerFn({ method: 'POST' })
   .inputValidator(registerSchema)
   .handler(async ({ data }) => {
     const supabase = getSupabaseServer()
-    const appUrl = process.env.VITE_APP_URL ?? 'http://localhost:3000'
+    const appUrl = getAppOrigin()
     const callbackUrl = `${appUrl}/auth/callback`
 
     // Pre-check: bail loudly if `auth.users` already has this email.
