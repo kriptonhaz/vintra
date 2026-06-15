@@ -830,9 +830,12 @@ function DesktopPreviewFrame({ children }: { children: React.ReactNode }) {
  */
 function MobilePreviewFrame({ children }: { children: React.ReactNode }) {
   const MOBILE_WIDTH = 390
+  // Fixed phone-sized viewport — roughly the height of the desktop
+  // preview box. The page scrolls INSIDE the iframe (like a real phone)
+  // instead of stretching the frame to the full page height.
+  const MOBILE_HEIGHT = 720
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [mountNode, setMountNode] = useState<HTMLElement | null>(null)
-  const [contentHeight, setContentHeight] = useState(700)
 
   function initDoc(doc: Document) {
     doc.head.innerHTML = ''
@@ -856,23 +859,6 @@ function MobilePreviewFrame({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Track content height (iframes don't auto-size). Observe the body from
-  // inside the iframe so it grows/shrinks with live edits.
-  useEffect(() => {
-    if (!mountNode) return
-    const win = iframeRef.current?.contentWindow as
-      | (Window & { ResizeObserver?: typeof ResizeObserver })
-      | null
-      | undefined
-    const measure = () => setContentHeight(mountNode.scrollHeight)
-    measure()
-    const RO = win?.ResizeObserver
-    if (!RO) return
-    const ro = new RO(measure)
-    ro.observe(mountNode)
-    return () => ro.disconnect()
-  }, [mountNode])
-
   return (
     <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-100 shadow-sm dark:border-gray-700 dark:bg-gray-900/60">
       <div className="flex items-center gap-1.5 border-b border-gray-200 bg-gray-100 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
@@ -880,15 +866,17 @@ function MobilePreviewFrame({ children }: { children: React.ReactNode }) {
         <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
         <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
       </div>
-      <div className="flex justify-center overflow-auto py-4">
+      <div className="flex justify-center py-4">
         <iframe
           ref={iframeRef}
           title="Pratinjau mobile"
           onLoad={handleLoad}
+          // Fixed device-sized viewport; content scrolls within the
+          // iframe (its own scrollbar), so the frame stays phone-shaped.
           style={{
             display: 'block',
             width: MOBILE_WIDTH,
-            height: contentHeight,
+            height: MOBILE_HEIGHT,
             border: 0,
             borderRadius: 12,
             background: '#fff',
