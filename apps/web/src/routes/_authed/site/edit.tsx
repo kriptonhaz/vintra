@@ -646,7 +646,7 @@ function SiteEditorPage() {
           {/* RIGHT — live preview. Sticky below the fixed h-16 header so it
               stays in view while the editor controls scroll; its own
               overflow-auto lets a tall preview scroll within the pane. */}
-          <div className="lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-auto">
+          <div className="min-w-0 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-auto">
             <div className="mb-2 flex items-center justify-between px-1">
               <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500">
                 <Eye className="h-3.5 w-3.5" />
@@ -793,26 +793,34 @@ function PreviewFrame({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Fit-to-width scale (never upscale beyond 1) — driven only by the
-  // container width (a stable, same-document measurement). Re-runs on
-  // container resize and when the device changes.
+  // Fit-to-width scale (never upscale beyond 1) — driven by the container
+  // width (a stable, same-document measurement). Recomputes on container
+  // resize, on device change, AND once the iframe content mounts (+ a rAF
+  // settle) so an initial measurement taken mid-layout self-corrects.
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
     const update = () =>
       setScale(Math.min(container.clientWidth / frameWidth, 1))
     update()
+    const raf = requestAnimationFrame(update)
     const ro = new ResizeObserver(update)
     ro.observe(container)
-    return () => ro.disconnect()
-  }, [frameWidth, device])
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [frameWidth, device, mountNode])
 
   // Track the iframe content height so the (unscaled) iframe is tall
   // enough and the outer box hugs the scaled height. Observe the body
   // from INSIDE the iframe (same-document) so it fires on live edits.
   useEffect(() => {
     if (!mountNode) return
-    const win = iframeRef.current?.contentWindow
+    const win = iframeRef.current?.contentWindow as
+      | (Window & { ResizeObserver?: typeof ResizeObserver })
+      | null
+      | undefined
     const measure = () => setContentHeight(mountNode.scrollHeight)
     measure()
     const RO = win?.ResizeObserver
