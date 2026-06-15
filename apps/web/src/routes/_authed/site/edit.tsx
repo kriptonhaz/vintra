@@ -793,21 +793,34 @@ function PreviewFrame({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Recompute scale (fit width, never upscale) + track content height.
+  // Fit-to-width scale (never upscale beyond 1) — driven only by the
+  // container width (a stable, same-document measurement). Re-runs on
+  // container resize and when the device changes.
   useEffect(() => {
     const container = containerRef.current
-    if (!container || !mountNode) return
-    const update = () => {
-      const next = Math.min(container.clientWidth / frameWidth, 1)
-      setScale(next)
-      setContentHeight(mountNode.scrollHeight)
-    }
+    if (!container) return
+    const update = () =>
+      setScale(Math.min(container.clientWidth / frameWidth, 1))
     update()
     const ro = new ResizeObserver(update)
     ro.observe(container)
+    return () => ro.disconnect()
+  }, [frameWidth, device])
+
+  // Track the iframe content height so the (unscaled) iframe is tall
+  // enough and the outer box hugs the scaled height. Observe the body
+  // from INSIDE the iframe (same-document) so it fires on live edits.
+  useEffect(() => {
+    if (!mountNode) return
+    const win = iframeRef.current?.contentWindow
+    const measure = () => setContentHeight(mountNode.scrollHeight)
+    measure()
+    const RO = win?.ResizeObserver
+    if (!RO) return
+    const ro = new RO(measure)
     ro.observe(mountNode)
     return () => ro.disconnect()
-  }, [mountNode, frameWidth, device])
+  }, [mountNode])
 
   return (
     <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -817,18 +830,23 @@ function PreviewFrame({
         <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
         <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
       </div>
-      <div ref={containerRef} className="flex justify-center overflow-hidden">
-        <div
-          style={{ height: contentHeight * scale, width: frameWidth * scale }}
-        >
+      {/* Block container with overflow-hidden — its clientWidth stays the
+          column width (the iframe's 1280px layout box is clipped, never
+          blows the measurement out). */}
+      <div ref={containerRef} className="overflow-hidden">
+        <div style={{ height: contentHeight * scale }}>
           <iframe
             ref={iframeRef}
             title="Pratinjau situs"
             onLoad={handleLoad}
             style={{
+              display: 'block',
               width: frameWidth,
               height: contentHeight,
               border: 0,
+              // Centers the narrow mobile frame; no-op on desktop where
+              // the 1280px box already exceeds the container (auto → 0).
+              marginInline: 'auto',
               transform: `scale(${scale})`,
               transformOrigin: 'top left',
             }}
