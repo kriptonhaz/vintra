@@ -62,14 +62,22 @@ function ResetPasswordPage() {
     const supabase = createBrowserSupabase()
     let cancelled = false
 
-    // Pre-flight #1: Supabase signals an expired/used link via the
-    // search string `?error=access_denied&error_code=otp_expired`. Bail
-    // out into the "expired" state immediately instead of spinning.
+    // Pre-flight #1: Supabase signals an expired/used link with
+    // `error=access_denied&error_code=otp_expired`. Depending on the flow
+    // this lands in the query string (`?…`) OR the URL fragment (`#…`) —
+    // the implicit/recovery flow uses the hash. Check BOTH; otherwise a
+    // re-opened (single-use, already-consumed) link slips past here, falls
+    // through to the stale-session fallback below, and shows a broken form
+    // that fails with "User from sub claim in JWT does not exist".
     if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search)
-      const errorCode = params.get('error_code')
-      const error = params.get('error')
+      const search = new URLSearchParams(window.location.search)
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+      const errorCode = search.get('error_code') ?? hash.get('error_code')
+      const error = search.get('error') ?? hash.get('error')
       if (errorCode === 'otp_expired' || error === 'access_denied') {
+        // Drop any stale recovery session so a later visit doesn't reuse
+        // it (it may belong to a since-deleted user).
+        void supabase.auth.signOut()
         setStage('expired')
         return
       }
@@ -167,6 +175,21 @@ function ResetPasswordPage() {
       password: values.newPassword,
     })
     if (updateError) {
+      // A stale/invalid recovery session (e.g. the link was already used,
+      // or the user was removed) surfaces as "User from sub claim in JWT
+      // does not exist" / a session error. Route to the clear "request a
+      // new link" screen instead of dumping the raw Supabase string.
+      const msg = updateError.message.toLowerCase()
+      if (
+        msg.includes('sub claim') ||
+        msg.includes('user not found') ||
+        msg.includes('session') ||
+        msg.includes('jwt')
+      ) {
+        await supabase.auth.signOut()
+        setStage('expired')
+        return
+      }
       setServerError(updateError.message)
       return
     }
