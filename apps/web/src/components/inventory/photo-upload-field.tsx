@@ -42,6 +42,16 @@ interface PhotoUploadFieldProps {
   /** Inline error text — usually a server-side message. */
   error?: string | null
   className?: string
+  /**
+   * Longest-edge cap for the resize (px). Defaults to 800 — right for
+   * small product/member thumbnails. Banners/hero images pass a much
+   * larger value (e.g. 1920) so they stay sharp at full width.
+   */
+  maxEdge?: number
+  /** Initial JPEG quality before adaptive size-fitting. Default 0.8. */
+  quality?: number
+  /** Size ceiling in KB (client + matches the server cap). Default 500. */
+  maxKB?: number
 }
 
 /**
@@ -60,6 +70,9 @@ export function PhotoUploadField({
   disabled,
   error,
   className,
+  maxEdge = 800,
+  quality = 0.8,
+  maxKB = 500,
 }: PhotoUploadFieldProps) {
   // Two distinct hidden inputs — one with the camera capture hint,
   // one without. The chooser modal triggers whichever the user picked.
@@ -80,14 +93,14 @@ export function PhotoUploadField({
     setBusy(true)
     try {
       const { dataUrl, bytes } = await compressImage(file, {
-        maxEdge: 800,
-        quality: 0.8,
+        maxEdge,
+        quality,
+        targetBytes: maxKB * 1024,
       })
-      // Hard ceiling — even after compression a worst-case image
-      // (e.g., an already-recompressed PDF screenshot) might still
-      // exceed the server limit. Fail fast in the UI rather than
-      // round-tripping a too-large data URL.
-      if (bytes > 500 * 1024) {
+      // Hard ceiling — even after adaptive compression a worst-case
+      // image might still exceed the server limit. Fail fast in the UI
+      // rather than round-tripping a too-large data URL.
+      if (bytes > maxKB * 1024) {
         setLocalError(
           `Foto masih ${Math.round(bytes / 1024)} KB setelah kompres. Coba foto lain.`,
         )
@@ -209,7 +222,7 @@ export function PhotoUploadField({
               <ImageIcon className="h-6 w-6" />
               <span className="font-medium">Pilih atau ambil foto</span>
               <span className="text-xs">
-                JPG/PNG/WebP, otomatis dikompres ~800 px
+                JPG/PNG/WebP, otomatis dikompres ~{maxEdge} px
               </span>
             </>
           )}

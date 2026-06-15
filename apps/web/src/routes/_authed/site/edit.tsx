@@ -1487,6 +1487,11 @@ function V2ImageField({
           uploadMutation.mutate(next)
         }}
         disabled={uploadMutation.isPending}
+        // Site images render large; default to a sharp 1600px unless the
+        // field overrides. maxKB tracks the server site-asset cap.
+        maxEdge={field.maxEdge ?? 1600}
+        quality={0.85}
+        maxKB={field.maxKB ?? 1500}
       />
       <p className="text-[11px] text-gray-500">
         {field.aspectHint ? `Rasio ${field.aspectHint}` : 'Ukuran fleksibel'}

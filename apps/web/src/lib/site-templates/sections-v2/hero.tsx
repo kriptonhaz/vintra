@@ -13,6 +13,7 @@
  * unambiguous CTA. Mobile-first throughout.
  */
 import { useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { ArrowRight, MessageCircle, MapPin } from 'lucide-react'
 import type { SectionDef, SectionRenderProps } from '../v2-types'
 
@@ -83,7 +84,13 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
   // regardless of screen width.
   const heroHeightRaw = String(settings.heroHeight ?? 'auto')
   const fixedHeight = ['40', '55', '70', '90', '100'].includes(heroHeightRaw)
-  const heightStyle = fixedHeight ? { height: `${heroHeightRaw}vh` } : undefined
+  // The fixed height is exposed as a CSS var so it can be applied only
+  // from `sm:` up — on mobile the band falls back to the image's 16:9
+  // ratio so a wide banner shows whole (like a normal carousel) instead
+  // of being cropped to a tall slice.
+  const heightStyle = fixedHeight
+    ? ({ ['--hero-h']: `${heroHeightRaw}vh` } as CSSProperties)
+    : undefined
 
   const images = resolveImages(
     settings.heroImages,
@@ -181,7 +188,7 @@ function HeroRender({ data, settings, theme, resolveAssetUrl }: SectionRenderPro
     if (fixedHeight) {
       return (
         <section
-          className="relative overflow-hidden bg-gray-100 dark:bg-gray-800"
+          className="relative aspect-[16/9] overflow-hidden bg-gray-100 sm:aspect-auto sm:h-[var(--hero-h)] dark:bg-gray-800"
           style={heightStyle}
         >
           <HeroCarousel
@@ -503,7 +510,10 @@ export const heroSection: SectionDef = {
           label: 'Foto',
           uploadKind: 'hero',
           aspectHint: '16:9',
-          maxKB: 500,
+          // Banners span the full viewport width — keep them high-res so
+          // they don't look blurry. ~1920px lands ~0.5–1.2 MB.
+          maxEdge: 1920,
+          maxKB: 1500,
         },
         {
           key: 'alt',

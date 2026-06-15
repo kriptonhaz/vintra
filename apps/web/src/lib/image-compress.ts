@@ -22,10 +22,11 @@
  */
 export async function compressImage(
   file: File,
-  opts: { maxEdge?: number; quality?: number } = {},
+  opts: { maxEdge?: number; quality?: number; targetBytes?: number } = {},
 ): Promise<{ dataUrl: string; bytes: number; mimeType: 'image/jpeg' }> {
   const maxEdge = opts.maxEdge ?? 800
   const quality = opts.quality ?? 0.8
+  const targetBytes = opts.targetBytes
 
   if (!file.type.startsWith('image/')) {
     throw new Error('File harus berupa gambar.')
@@ -34,22 +35,52 @@ export async function compressImage(
   const sourceUrl = URL.createObjectURL(file)
   try {
     const img = await loadImage(sourceUrl)
-    const { width, height } = scaleToFit(img.width, img.height, maxEdge)
+    let { width, height } = scaleToFit(img.width, img.height, maxEdge)
 
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('Browser tidak mendukung canvas untuk kompres foto.')
+    const render = (w: number, h: number, q: number): string => {
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx)
+        throw new Error('Browser tidak mendukung canvas untuk kompres foto.')
+      // High-quality downscale, and white backing so transparent PNGs
+      // don't turn into black blocks in the JPEG output.
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, w, h)
+      ctx.drawImage(img, 0, 0, w, h)
+      return canvas.toDataURL('image/jpeg', q)
+    }
 
-    // White background prevents transparent PNG inputs from rendering
-    // as black blocks in the JPEG output.
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, width, height)
-    ctx.drawImage(img, 0, 0, width, height)
+    let dataUrl = render(width, height, quality)
+    let bytes = estimateDataUrlBytes(dataUrl)
 
-    const dataUrl = canvas.toDataURL('image/jpeg', quality)
-    const bytes = estimateDataUrlBytes(dataUrl)
+    // When a size budget is given, keep the dimensions sharp and instead
+    // step the JPEG quality down until it fits; only as a last resort
+    // (still too big at low quality) do we shrink the pixels. This keeps
+    // large banners crisp rather than blanket-downscaling to 800px.
+    if (targetBytes && bytes > targetBytes) {
+      for (
+        let q = quality - 0.07;
+        q >= 0.5 && bytes > targetBytes;
+        q -= 0.07
+      ) {
+        dataUrl = render(width, height, q)
+        bytes = estimateDataUrlBytes(dataUrl)
+      }
+      // Still over budget at q=0.5 → progressively reduce resolution.
+      let guard = 0
+      while (bytes > targetBytes && Math.max(width, height) > 600 && guard < 6) {
+        width = Math.round(width * 0.85)
+        height = Math.round(height * 0.85)
+        dataUrl = render(width, height, 0.7)
+        bytes = estimateDataUrlBytes(dataUrl)
+        guard++
+      }
+    }
+
     return { dataUrl, bytes, mimeType: 'image/jpeg' }
   } finally {
     URL.revokeObjectURL(sourceUrl)

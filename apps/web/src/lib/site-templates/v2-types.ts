@@ -83,6 +83,12 @@ export type V2ImageField = BaseField & {
   maxKB?: number
   aspectHint?: string
   uploadKind?: 'logo' | 'hero' | 'gallery' | 'og'
+  /**
+   * Longest-edge cap for client-side resize (px). Banners/hero images
+   * want a large value (~1920) to stay sharp at full width; small
+   * thumbnails can stay low. Defaults applied in the renderer.
+   */
+  maxEdge?: number
 }
 
 export type V2SelectField = BaseField & {

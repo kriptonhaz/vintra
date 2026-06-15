@@ -119,7 +119,8 @@ export const gallerySection: SectionDef = {
           label: 'Foto',
           uploadKind: 'gallery',
           aspectHint: '4:3',
-          maxKB: 500,
+          maxEdge: 1600,
+          maxKB: 1000,
         },
         {
           key: 'caption',

@@ -1002,8 +1002,14 @@ export async function uploadWaMediaOutbound(
 // photos: client-side compresses, server stores raw bytes, signed-URL
 // GETs for display.
 
-/** Max site asset size — 500 KB after compression. Same as inventory. */
-export const MAX_SITE_ASSET_BYTES = 500 * 1024
+/**
+ * Max site asset size after compression. Larger than inventory (500 KB)
+ * because hero/gallery images render full-width and must stay sharp —
+ * the client compresses banners at a higher resolution (~1920px) which
+ * lands around 0.5–1.2 MB. Marketing surface, cached aggressively, so
+ * the heavier payload is acceptable.
+ */
+export const MAX_SITE_ASSET_BYTES = 1500 * 1024
 
 /**
  * Site asset categories. Pinned to a small enum because the editor
