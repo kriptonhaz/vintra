@@ -499,12 +499,16 @@ export const uploadSiteAsset = createServerFn({ method: 'POST' })
     const { tenantId } = await requirePermission('booking.write')
     const { bytes, mimeType } = parseDataUrl(data.dataUrl)
 
-    // Single-slot kinds reuse a fixed assetId so re-uploading overwrites
-    // the same S3 object — no orphan accumulation. Gallery is the
-    // only multi-slot kind; each upload gets its own uuid so the
-    // tenant can collect multiple photos.
+    // Single-slot kinds (logo, og) reuse a fixed assetId so re-uploading
+    // overwrites the same S3 object — no orphan accumulation. Multi-slot
+    // kinds (gallery, hero) are repeaters: each upload gets its own uuid
+    // so two photos don't collide on one key (which made uploading hero
+    // photo #2 silently overwrite photo #1).
     const kind = data.kind as TenantSiteAssetKind
-    const assetId = kind === 'gallery' ? randomUUID().slice(0, 12) : kind
+    const MULTI_SLOT_KINDS: TenantSiteAssetKind[] = ['gallery', 'hero']
+    const assetId = MULTI_SLOT_KINDS.includes(kind)
+      ? randomUUID().slice(0, 12)
+      : kind
 
     const { key } = await uploadTenantSiteAsset({
       tenantId,
