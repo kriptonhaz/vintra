@@ -685,16 +685,29 @@ function SiteEditorPage() {
                 </button>
               </div>
             </div>
-            <PreviewFrame device={previewDevice}>
-              <PublicSiteRenderV2
-                settings={settings}
-                data={renderData}
-                resolveAssetUrl={(key) =>
-                  key ? (assetUrls[key] ?? null) : null
-                }
-                isEditorPreview
-              />
-            </PreviewFrame>
+            {previewDevice === 'mobile' ? (
+              <MobilePreviewFrame>
+                <PublicSiteRenderV2
+                  settings={settings}
+                  data={renderData}
+                  resolveAssetUrl={(key) =>
+                    key ? (assetUrls[key] ?? null) : null
+                  }
+                  isEditorPreview
+                />
+              </MobilePreviewFrame>
+            ) : (
+              <DesktopPreviewFrame>
+                <PublicSiteRenderV2
+                  settings={settings}
+                  data={renderData}
+                  resolveAssetUrl={(key) =>
+                    key ? (assetUrls[key] ?? null) : null
+                  }
+                  isEditorPreview
+                />
+              </DesktopPreviewFrame>
+            )}
             <p className="mt-2 px-1 text-xs text-gray-500">
               Tampilan persis seperti yang dilihat customer di{' '}
               {publicSlug ? `${publicSlug}.vintra.my.id` : 'subdomain Anda nanti'}.
@@ -745,29 +758,82 @@ function SiteEditorPage() {
  * window resize) and the inner content (whose height changes on every
  * keystroke as sections are edited), so the outer box always hugs the
  * scaled height with no dead space.
+ *
+ * Inline (not an iframe) on purpose — desktop is the common case and this
+ * shares React state with the editor directly. The MOBILE preview needs
+ * an iframe to get a real narrow viewport for breakpoints; see below.
  */
-function PreviewFrame({
-  device,
-  children,
-}: {
-  device: 'desktop' | 'mobile'
-  children: React.ReactNode
-}) {
+function DesktopPreviewFrame({ children }: { children: React.ReactNode }) {
   const DESKTOP_WIDTH = 1280
-  const MOBILE_WIDTH = 390
-  const frameWidth = device === 'mobile' ? MOBILE_WIDTH : DESKTOP_WIDTH
-
   const containerRef = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(0.5)
+  const [scaledHeight, setScaledHeight] = useState(0)
+
+  useEffect(() => {
+    const container = containerRef.current
+    const inner = innerRef.current
+    if (!container || !inner) return
+
+    const update = () => {
+      const nextScale = container.clientWidth / DESKTOP_WIDTH
+      setScale(nextScale)
+      setScaledHeight(inner.scrollHeight * nextScale)
+    }
+
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(container)
+    ro.observe(inner)
+    return () => ro.disconnect()
+  }, [])
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      {/* Browser chrome — sells the "desktop window" feel. */}
+      <div className="flex items-center gap-1.5 border-b border-gray-200 bg-gray-100 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+        <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
+        <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+        <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
+      </div>
+      <div ref={containerRef} className="overflow-hidden">
+        <div style={{ height: scaledHeight }}>
+          <div
+            ref={innerRef}
+            // `light-scope` forces the public render to light mode (see
+            // app.css dark variant) so the preview matches the deployed
+            // public page, which is always light.
+            className="light-scope"
+            style={{
+              width: DESKTOP_WIDTH,
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+            }}
+          >
+            {children}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Mobile preview frame ────────────────────────────────────────────
+
+/**
+ * Mobile preview. Unlike desktop (inline), this renders inside an iframe
+ * so CSS media queries respond to the simulated phone width (390px) — an
+ * inline narrow div would still see the real desktop viewport and show
+ * the desktop layout. We clone the app's stylesheets into the iframe and
+ * portal the React tree into its body, so the preview keeps sharing
+ * editor state (no postMessage). Shown at actual size, centered.
+ */
+function MobilePreviewFrame({ children }: { children: React.ReactNode }) {
+  const MOBILE_WIDTH = 390
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [mountNode, setMountNode] = useState<HTMLElement | null>(null)
-  const [scale, setScale] = useState(0.5)
-  const [contentHeight, setContentHeight] = useState(600)
+  const [contentHeight, setContentHeight] = useState(700)
 
-  // Render the preview inside an iframe so CSS media queries respond to
-  // the simulated device width (an inline div at 390px would still see
-  // the real desktop viewport and show the desktop layout). We clone the
-  // app's stylesheets into the iframe and portal the React tree into its
-  // body — so the preview keeps sharing editor state, no postMessage.
   function initDoc(doc: Document) {
     doc.head.innerHTML = ''
     document
@@ -775,8 +841,6 @@ function PreviewFrame({
       .forEach((node) => doc.head.appendChild(node.cloneNode(true)))
     doc.documentElement.style.background = '#ffffff'
     doc.body.style.margin = '0'
-    // Public page is always light; the iframe html has no `.dark` class,
-    // but keep light-scope as belt-and-suspenders.
     doc.body.className = 'light-scope'
     setMountNode(doc.body)
   }
@@ -786,35 +850,14 @@ function PreviewFrame({
     if (doc) initDoc(doc)
   }
 
-  // about:blank may already be ready before onLoad fires in some browsers.
   useEffect(() => {
     const doc = iframeRef.current?.contentDocument
     if (doc && doc.readyState === 'complete' && !mountNode) initDoc(doc)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Fit-to-width scale (never upscale beyond 1) — driven by the container
-  // width (a stable, same-document measurement). Recomputes on container
-  // resize, on device change, AND once the iframe content mounts (+ a rAF
-  // settle) so an initial measurement taken mid-layout self-corrects.
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-    const update = () =>
-      setScale(Math.min(container.clientWidth / frameWidth, 1))
-    update()
-    const raf = requestAnimationFrame(update)
-    const ro = new ResizeObserver(update)
-    ro.observe(container)
-    return () => {
-      cancelAnimationFrame(raf)
-      ro.disconnect()
-    }
-  }, [frameWidth, device, mountNode])
-
-  // Track the iframe content height so the (unscaled) iframe is tall
-  // enough and the outer box hugs the scaled height. Observe the body
-  // from INSIDE the iframe (same-document) so it fires on live edits.
+  // Track content height (iframes don't auto-size). Observe the body from
+  // inside the iframe so it grows/shrinks with live edits.
   useEffect(() => {
     if (!mountNode) return
     const win = iframeRef.current?.contentWindow as
@@ -831,35 +874,28 @@ function PreviewFrame({
   }, [mountNode])
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-      {/* Browser chrome — sells the "window" feel. */}
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-100 shadow-sm dark:border-gray-700 dark:bg-gray-900/60">
       <div className="flex items-center gap-1.5 border-b border-gray-200 bg-gray-100 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
         <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
         <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
       </div>
-      {/* Block container with overflow-hidden — its clientWidth stays the
-          column width (the iframe's 1280px layout box is clipped, never
-          blows the measurement out). */}
-      <div ref={containerRef} className="overflow-hidden">
-        <div style={{ height: contentHeight * scale }}>
-          <iframe
-            ref={iframeRef}
-            title="Pratinjau situs"
-            onLoad={handleLoad}
-            style={{
-              display: 'block',
-              width: frameWidth,
-              height: contentHeight,
-              border: 0,
-              // Centers the narrow mobile frame; no-op on desktop where
-              // the 1280px box already exceeds the container (auto → 0).
-              marginInline: 'auto',
-              transform: `scale(${scale})`,
-              transformOrigin: 'top left',
-            }}
-          />
-        </div>
+      <div className="flex justify-center overflow-auto py-4">
+        <iframe
+          ref={iframeRef}
+          title="Pratinjau mobile"
+          onLoad={handleLoad}
+          style={{
+            display: 'block',
+            width: MOBILE_WIDTH,
+            height: contentHeight,
+            border: 0,
+            borderRadius: 12,
+            background: '#fff',
+            flexShrink: 0,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          }}
+        />
       </div>
       {mountNode && createPortal(children, mountNode)}
     </div>
