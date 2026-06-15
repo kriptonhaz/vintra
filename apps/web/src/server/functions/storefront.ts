@@ -859,6 +859,61 @@ export const trackOrder = createServerFn({ method: 'POST' })
     }
   })
 
+// ─── buyer confirms receipt ─────────────────────────────────────────
+
+/**
+ * Buyer-side "Pesanan diterima" — lets the customer mark a shipped/ready
+ * order as completed from the tracking page (mirrors the seller's
+ * completeOnlineOrder, but verified by order number + phone). Only
+ * shipped (delivery) or ready (pickup) orders can be confirmed received;
+ * already-completed is treated as success (idempotent). No stock change —
+ * stock was deducted on confirmation. Completing unlocks the review form.
+ */
+export const confirmOrderReceived = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      slug: z.string(),
+      orderNumber: z.string().min(1).max(40),
+      phone: z.string().min(4).max(25),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const tenant = await resolveTenant(data.slug)
+    if (!tenant) return { ok: false as const, message: 'Toko tidak ditemukan' }
+    const phone = normalizePhone(data.phone)
+    if (!phone) return { ok: false as const, message: 'Nomor tidak valid' }
+
+    const [order] = await db
+      .select({ id: onlineOrders.id, status: onlineOrders.status })
+      .from(onlineOrders)
+      .where(
+        and(
+          eq(onlineOrders.tenantId, tenant.id),
+          sql`upper(${onlineOrders.orderNumber}) = upper(${data.orderNumber.trim()})`,
+          eq(onlineOrders.customerPhone, phone),
+        ),
+      )
+      .limit(1)
+    if (!order) {
+      return { ok: false as const, message: 'Pesanan tidak ditemukan' }
+    }
+    if (order.status === 'completed') {
+      return { ok: true as const }
+    }
+    if (order.status !== 'shipped' && order.status !== 'ready') {
+      return {
+        ok: false as const,
+        message: 'Pesanan belum bisa dikonfirmasi diterima',
+      }
+    }
+    const now = new Date()
+    await db
+      .update(onlineOrders)
+      .set({ status: 'completed', completedAt: now, updatedAt: now })
+      .where(eq(onlineOrders.id, order.id))
+    return { ok: true as const }
+  })
+
 // ─── product reviews ───────────────────────────────────────────────
 
 /**

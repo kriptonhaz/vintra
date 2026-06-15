@@ -8,11 +8,12 @@
  */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useState } from 'react'
-import { ArrowLeft, Loader2, Star, Check } from 'lucide-react'
+import { ArrowLeft, Loader2, Star, Check, PackageCheck } from 'lucide-react'
 import {
   getStorefrontContext,
   trackOrder,
   submitProductReview,
+  confirmOrderReceived,
 } from '@/server/functions/storefront'
 import { TrackResultView } from '@/lib/site-templates/sections-v2/shop'
 
@@ -41,10 +42,14 @@ function TrackPage() {
     Awaited<ReturnType<typeof trackOrder>> | null
   >(null)
 
+  const [confirming, setConfirming] = useState(false)
+  const [confirmErr, setConfirmErr] = useState<string | null>(null)
+
   async function lookup() {
     if (!orderNumber.trim() || !phone.trim()) return
     setLoading(true)
     setResult(null)
+    setConfirmErr(null)
     try {
       setResult(
         await trackOrder({
@@ -57,6 +62,42 @@ function TrackPage() {
       setLoading(false)
     }
   }
+
+  // Re-fetch silently (no spinner / no clear) after the buyer confirms
+  // receipt, so the status + review form update in place.
+  async function refresh() {
+    try {
+      setResult(
+        await trackOrder({
+          data: { slug, orderNumber: orderNumber.trim(), phone: phone.trim() },
+        }),
+      )
+    } catch {
+      /* keep current result */
+    }
+  }
+
+  async function handleConfirmReceived() {
+    setConfirmErr(null)
+    setConfirming(true)
+    try {
+      const res = await confirmOrderReceived({
+        data: { slug, orderNumber: orderNumber.trim(), phone: phone.trim() },
+      })
+      if (res.ok) {
+        await refresh()
+      } else {
+        setConfirmErr(res.message)
+      }
+    } catch {
+      setConfirmErr('Gagal mengonfirmasi. Coba lagi.')
+    } finally {
+      setConfirming(false)
+    }
+  }
+
+  const canConfirmReceipt =
+    result?.found && (result.status === 'shipped' || result.status === 'ready')
 
   const inputCls =
     'w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm'
@@ -113,6 +154,32 @@ function TrackPage() {
         {result && (
           <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-4">
             <TrackResultView result={result} brandColor={brandColor} />
+          </div>
+        )}
+
+        {canConfirmReceipt && (
+          <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-4">
+            <p className="text-sm text-gray-600">
+              Sudah terima pesananmu? Konfirmasi supaya pesanan ditandai
+              selesai.
+            </p>
+            {confirmErr && (
+              <p className="mt-2 text-xs text-red-600">{confirmErr}</p>
+            )}
+            <button
+              type="button"
+              onClick={handleConfirmReceived}
+              disabled={confirming}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+              style={{ backgroundColor: brandColor }}
+            >
+              {confirming ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <PackageCheck className="h-4 w-4" />
+              )}
+              Pesanan diterima
+            </button>
           </div>
         )}
 
