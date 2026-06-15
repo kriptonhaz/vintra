@@ -2612,13 +2612,19 @@
     },
     "hero": {
       "badge": "The #1 Business Solution in Indonesia",
-      "titleStart": "Run Your Business ",
-      "titleHighlight1": "Easier",
-      "titleAnd": " & ",
-      "titleHighlight2": "More Profitable",
-      "subtitle": "An all-in-one platform for product and service businesses in Indonesia. Calculate Cost of Goods Sold, run the cashier, track stock, manage bookings & reservations, handle attendance, and reply to customers automatically with WhatsApp AI — all in one place.",
+      "titleLead": "Everything your",
+      "slotWords": ["café", "shop", "salon", "workshop", "service"],
+      "titleTrail": "needs, in one app",
+      "subtitle": "Open an online store, run your cashier & stock, and handle customer chats — one platform for product and service businesses.",
+      "orderMockup": {
+        "label": "New Order",
+        "via": "Online Store",
+        "item": "Gula Aren Latte ×2",
+        "statusPaid": "Paid",
+        "statusShipped": "Shipped"
+      },
       "ctaPrimary": "Start Free Now",
-      "ctaDemo": "See Demo",
+      "ctaDemo": "See Features",
       "wedge1": "Free forever for Cost of Goods Sold",
       "wedge2": "No credit card required",
       "wedge3": "5-minute setup",
@@ -2658,7 +2664,7 @@
         },
         {
           "title": "Online Store Website (Situs)",
-          "description": "A ready-made website for your business — showcase products and services and get found online."
+          "description": "A ready-to-sell online store: product & service showcase, cart, checkout, and built-in order management."
         },
         {
           "title": "WhatsApp AI",

@@ -7,10 +7,11 @@ import { CheckCircle2 } from "lucide-react";
 import {
   Calculator,
   ShoppingCart,
+  ShoppingBag,
   Package,
   Clock,
   ArrowRight,
-  Play,
+  ChevronDown,
   Check,
   Star,
   MessageCircle,
@@ -24,6 +25,7 @@ import { LandingNavbar } from "@/components/layout/landing-navbar";
 import { LandingFooter } from "@/components/layout/landing-footer";
 import { WhatsappFloat } from "@/components/layout/whatsapp-float";
 import { Reveal } from "@/components/layout/reveal";
+import { SlotText } from "@/components/layout/slot-text";
 // Lazy-loaded so the tenant public-site bundle — which statically pulls in
 // Leaflet and its render-blocking CSS — stays OUT of the apex landing page's
 // critical path. The landing route (`kind: 'landing'`) never renders these,
@@ -216,8 +218,8 @@ function ChatWidget({ className }: { className?: string }) {
   );
 }
 
-/** HPP outcome card — the one number every owner checks. */
-function MarginWidget({ className }: { className?: string }) {
+/** Online-store order card — the killer feature: sell online, get paid. */
+function OrderWidget({ className }: { className?: string }) {
   const { t } = useTranslation();
   return (
     <div
@@ -226,20 +228,39 @@ function MarginWidget({ className }: { className?: string }) {
         className,
       )}
     >
-      <p className="text-[10px] font-semibold tracking-wider text-gray-500 uppercase">
-        {t("landing.hpp.mockup.hppLabel")}
-      </p>
-      <p className="mt-1 text-2xl font-extrabold tracking-tight text-gray-900">
-        Rp 14.000
-      </p>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-gray-100">
-        <div className="h-full w-[64%] rounded-full bg-gradient-to-r from-brand-500 to-brand-700" />
-      </div>
-      <div className="mt-2 flex items-center justify-between text-[11px]">
-        <span className="text-gray-500">
-          {t("landing.hpp.mockup.marginSummary")}
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-500">
+            <ShoppingBag className="h-3.5 w-3.5 text-white" />
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold tracking-wider text-gray-500 uppercase">
+              {t("landing.hero.orderMockup.label")}
+            </p>
+            <p className="text-[9px] font-semibold text-brand-600">
+              {t("landing.hero.orderMockup.via")}
+            </p>
+          </div>
+        </div>
+        {/* "just came in" pulse */}
+        <span className="relative mt-0.5 flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-70" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
         </span>
-        <span className="font-bold text-success-600">36.4%</span>
+      </div>
+      <p className="mt-3 text-[13px] font-semibold text-gray-900">
+        {t("landing.hero.orderMockup.item")}
+      </p>
+      <p className="mt-0.5 text-xl font-extrabold tracking-tight text-gray-900">
+        Rp 44.000
+      </p>
+      <div className="mt-3 flex items-center gap-1.5">
+        <span className="rounded-full bg-success-400/15 px-2 py-0.5 text-[9px] font-semibold text-success-600">
+          {t("landing.hero.orderMockup.statusPaid")}
+        </span>
+        <span className="rounded-full bg-brand-500/15 px-2 py-0.5 text-[9px] font-semibold text-brand-600">
+          {t("landing.hero.orderMockup.statusShipped")}
+        </span>
       </div>
     </div>
   );
@@ -308,14 +329,16 @@ function HeroSection() {
           </span>
 
           <h1 className="mb-6 max-w-2xl text-4xl font-extrabold leading-[1.05] tracking-tight text-white sm:text-6xl lg:text-7xl">
-            {t("landing.hero.titleStart")}
-            <span className="bg-gradient-to-r from-brand-300 via-brand-400 to-brand-300 bg-clip-text text-transparent">
-              {t("landing.hero.titleHighlight1")}
-            </span>
-            {t("landing.hero.titleAnd")}
-            <span className="bg-gradient-to-r from-accent-200 via-accent-300 to-accent-400 bg-clip-text text-transparent">
-              {t("landing.hero.titleHighlight2")}
-            </span>
+            {t("landing.hero.titleLead")}{" "}
+            <SlotText
+              words={
+                t("landing.hero.slotWords", {
+                  returnObjects: true,
+                }) as string[]
+              }
+              wordClassName="bg-gradient-to-r from-accent-200 via-accent-300 to-accent-400 bg-clip-text text-transparent"
+            />{" "}
+            {t("landing.hero.titleTrail")}
           </h1>
 
           <p className="mb-10 max-w-xl text-lg leading-relaxed text-gray-400 sm:text-xl">
@@ -334,7 +357,7 @@ function HeroSection() {
               href="#fitur"
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-7 py-3.5 text-base font-semibold text-gray-200 backdrop-blur transition-colors hover:bg-white/10"
             >
-              <Play className="h-4 w-4" />
+              <ChevronDown className="h-4 w-4" />
               {t("landing.hero.ctaDemo")}
             </a>
           </div>
@@ -357,7 +380,7 @@ function HeroSection() {
         <div className="relative mx-auto h-[440px] w-full max-w-sm lg:col-span-5 lg:max-w-none">
           <Glow className="inset-8 bg-brand-600/20" />
           <ChatWidget className="animate-float absolute top-0 right-0 z-20 -rotate-2" />
-          <MarginWidget className="animate-float-delayed absolute top-44 left-0 z-30 rotate-3" />
+          <OrderWidget className="animate-float-delayed absolute top-44 left-0 z-30 rotate-3" />
           <AttendanceWidget className="animate-float absolute bottom-0 right-6 z-10 rotate-1" />
           {/* Connector hint — a faint dashed thread tying the widgets
               together, suggesting one connected system. */}

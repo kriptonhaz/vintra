@@ -2612,13 +2612,19 @@
     },
     "hero": {
       "badge": "Solusi Bisnis No. #1 di Indonesia",
-      "titleStart": "Kelola Usaha Jadi ",
-      "titleHighlight1": "Lebih Mudah",
-      "titleAnd": " & ",
-      "titleHighlight2": "Untung",
-      "subtitle": "Platform all-in-one untuk bisnis produk maupun jasa di Indonesia. Hitung HPP, kelola kasir, pantau stok, atur booking & reservasi, absensi karyawan, dan balas chat pelanggan otomatis dengan AI WhatsApp — semua dalam satu tempat.",
+      "titleLead": "Semua kebutuhan",
+      "slotWords": ["Kafe", "Toko", "Salon", "Bengkel", "Jasa"],
+      "titleTrail": "dalam satu aplikasi",
+      "subtitle": "Buka toko online, kelola kasir & stok, sampai chat pelanggan — satu platform untuk bisnis produk maupun jasa.",
+      "orderMockup": {
+        "label": "Pesanan Baru",
+        "via": "Toko Online",
+        "item": "Kopi Susu Gula Aren ×2",
+        "statusPaid": "Lunas",
+        "statusShipped": "Dikirim"
+      },
       "ctaPrimary": "Mulai Gratis Sekarang",
-      "ctaDemo": "Lihat Demo",
+      "ctaDemo": "Lihat Fitur",
       "wedge1": "Gratis selamanya untuk HPP",
       "wedge2": "Tanpa kartu kredit",
       "wedge3": "Setup 5 menit",
@@ -2658,7 +2664,7 @@
         },
         {
           "title": "Situs Toko Online",
-          "description": "Website siap pakai untuk usaha Anda — tampilkan produk dan layanan, dan mudah ditemukan online."
+          "description": "Toko online siap jualan: etalase produk & layanan, keranjang, checkout, sampai kelola pesanan yang masuk."
         },
         {
           "title": "WhatsApp AI",
