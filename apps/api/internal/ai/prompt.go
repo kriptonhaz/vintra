@@ -46,14 +46,22 @@ func Build(in BuildInput) []Message {
 	msgs = append(msgs, Message{Role: "system", Content: ctx})
 
 	// RAG context block — injected before conversation history so the model
-	// sees fresh data before interpreting the conversation.
+	// sees fresh data before interpreting the conversation. The closing
+	// directive makes retrieved data authoritative: without it, a
+	// conservative tenant system prompt ("alihkan ke admin untuk pertanyaan
+	// pesanan/pengiriman") makes the bot hand off order-status questions to a
+	// human even though the answer is sitting right here in the context.
 	if len(in.Retrieved) > 0 {
 		var sb strings.Builder
-		sb.WriteString("Konteks dari sistem (gunakan jika relevan):")
+		sb.WriteString("Konteks dari sistem (data terkini — utamakan ini untuk menjawab):")
 		for _, s := range in.Retrieved {
 			sb.WriteString("\n- ")
 			sb.WriteString(s.Text)
 		}
+		sb.WriteString("\n\nPetunjuk: jika konteks di atas sudah menjawab pertanyaan pelanggan " +
+			"(mis. status/posisi pesanan, harga, stok, poin, jam buka), jawab langsung pakai data itu — " +
+			"jangan bilang tidak punya akses dan jangan alihkan ke admin hanya untuk cek status. " +
+			"Alihkan ke admin hanya untuk komplain, refund, ubah pesanan, atau jika datanya memang tidak ada di konteks.")
 		msgs = append(msgs, Message{Role: "system", Content: sb.String()})
 	}
 
