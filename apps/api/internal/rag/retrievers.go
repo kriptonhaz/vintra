@@ -460,13 +460,27 @@ func (r *orderHistoryRetriever) Retrieve(ctx context.Context, db queries.DBTX, t
 	return []Snippet{s}, nil
 }
 
+// onlinePaymentLabel maps an online order payment method to an Indonesian
+// label for the buyer-facing reply.
+var onlinePaymentLabel = map[string]string{
+	"transfer":  "Transfer Bank",
+	"qris":      "QRIS",
+	"cash":      "Tunai (bayar di tempat)",
+	"dana":      "DANA",
+	"gopay":     "GoPay",
+	"ovo":       "OVO",
+	"shopeepay": "ShopeePay",
+}
+
 // onlineOrdersStatusRetriever looks up the buyer's TOKO ONLINE orders by
 // their WhatsApp number so the AI can answer "where's my order?" even when
 // the buyer lost their order number. Scope: in-progress orders (pending /
 // confirmed / ready / shipped) plus orders completed in the last 14 days.
 // Cancelled orders are excluded. Newest first, capped at 5. Each line
-// carries the order number, status, items, total, and (for shipped) the
-// courier + tracking number.
+// carries the order number, status, items, total, and payment method (plus
+// courier + resi for shipped). When any order is still awaiting a bank
+// transfer, the tenant's transfer account(s) are appended so the AI can
+// tell the buyer exactly where to pay.
 type onlineOrdersStatusRetriever struct{}
 
 func (r *onlineOrdersStatusRetriever) Retrieve(ctx context.Context, db queries.DBTX, tenantID pgtype.UUID, remoteJid string, _ []string, _ bool, verbose bool) ([]Snippet, error) {
@@ -476,7 +490,7 @@ func (r *onlineOrdersStatusRetriever) Retrieve(ctx context.Context, db queries.D
 	}
 
 	rows, err := db.Query(ctx, `
-		SELECT o.order_number, o.status, o.total::text,
+		SELECT o.order_number, o.status, o.total::text, o.payment_method,
 		       o.courier_name, o.tracking_number,
 		       COALESCE((
 		         SELECT string_agg(
@@ -502,11 +516,12 @@ func (r *onlineOrdersStatusRetriever) Retrieve(ctx context.Context, db queries.D
 
 	var parts []string
 	var rawVals [][]any
+	awaitingTransfer := false
 	i := 0
 	for rows.Next() {
 		var orderNum, status, total, items string
-		var courier, tracking pgtype.Text
-		if err := rows.Scan(&orderNum, &status, &total, &courier, &tracking, &items); err != nil {
+		var payMethod, courier, tracking pgtype.Text
+		if err := rows.Scan(&orderNum, &status, &total, &payMethod, &courier, &tracking, &items); err != nil {
 			return nil, err
 		}
 		i++
@@ -526,8 +541,19 @@ func (r *onlineOrdersStatusRetriever) Retrieve(ctx context.Context, db queries.D
 		if items != "" {
 			itemPart = "; item: " + items
 		}
-		parts = append(parts, fmt.Sprintf("%d) %s — %s%s%s; total %s",
-			i, orderNum, label, resi, itemPart, formatRupiah(total)))
+		pay := ""
+		if payMethod.Valid && payMethod.String != "" {
+			pl := onlinePaymentLabel[payMethod.String]
+			if pl == "" {
+				pl = payMethod.String
+			}
+			pay = "; bayar via " + pl
+			if payMethod.String == "transfer" && status == "pending" {
+				awaitingTransfer = true
+			}
+		}
+		parts = append(parts, fmt.Sprintf("%d) %s — %s%s%s; total %s%s",
+			i, orderNum, label, resi, itemPart, formatRupiah(total), pay))
 		if verbose {
 			rawVals = append(rawVals, []any{orderNum, status, total})
 		}
@@ -536,14 +562,56 @@ func (r *onlineOrdersStatusRetriever) Retrieve(ctx context.Context, db queries.D
 		return nil, nil
 	}
 
-	s := Snippet{
-		Text:   "Pesanan online pelanggan ini: " + strings.Join(parts, " | "),
-		Source: "online_orders_status",
+	text := "Pesanan online pelanggan ini: " + strings.Join(parts, " | ")
+
+	// For orders still awaiting a bank transfer, append the destination
+	// account(s) so the AI can answer "bayarnya ke mana?". Bank accounts
+	// are the single source of truth on pos_settings (jsonb).
+	if awaitingTransfer {
+		if banks := fetchActiveBankAccounts(ctx, db, tenantID); banks != "" {
+			text += " || Rekening transfer tujuan: " + banks
+		}
 	}
+
+	s := Snippet{Text: text, Source: "online_orders_status"}
 	if verbose {
 		s.RawRows = rowsToMaps([]string{"order_number", "status", "total"}, rawVals)
 	}
 	return []Snippet{s}, nil
+}
+
+// fetchActiveBankAccounts returns a human-readable list of the tenant's
+// active transfer accounts ("BCA 123 a.n. Budi; BNI 456 a.n. Budi") from
+// pos_settings.bank_accounts, or "" when none/unreadable. Best-effort —
+// the order snippet still renders without it.
+func fetchActiveBankAccounts(ctx context.Context, db queries.DBTX, tenantID pgtype.UUID) string {
+	var raw []byte
+	if err := db.QueryRow(ctx,
+		`SELECT bank_accounts FROM pos_settings WHERE tenant_id = $1`,
+		tenantID).Scan(&raw); err != nil || len(raw) == 0 {
+		return ""
+	}
+	var accts []struct {
+		BankName      string `json:"bankName"`
+		AccountNumber string `json:"accountNumber"`
+		AccountHolder string `json:"accountHolder"`
+		Active        bool   `json:"active"`
+	}
+	if err := json.Unmarshal(raw, &accts); err != nil {
+		return ""
+	}
+	var out []string
+	for _, a := range accts {
+		if !a.Active || a.AccountNumber == "" {
+			continue
+		}
+		line := strings.TrimSpace(a.BankName + " " + a.AccountNumber)
+		if a.AccountHolder != "" {
+			line += " a.n. " + a.AccountHolder
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "; ")
 }
 
 // ── 9. recipe_availability ────────────────────────────────────────────────────
