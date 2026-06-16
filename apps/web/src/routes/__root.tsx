@@ -10,6 +10,7 @@ import { ThemeProvider } from "@/lib/theme";
 import { AuthContext, useAuthProvider } from "@/hooks/use-auth";
 import { ToastProvider } from "@/components/ui/toast";
 import "@/lib/i18n";
+import { safeSessionStorage } from "@/lib/safe-storage";
 import appCss from "@/styles/app.css?url";
 
 const queryClient = new QueryClient({
@@ -76,7 +77,10 @@ export const Route = createRootRoute({
     ],
     scripts: [
       {
-        children: `(function(){if(window.location.pathname==='/')return;var t=localStorage.getItem('jq-theme');var e=(t==='light'||t==='dark')?t:(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(e==='dark')document.documentElement.classList.add('dark')})()`,
+        // localStorage access is wrapped in try/catch — iOS Safari
+        // throws SecurityError on it under "Block All Cookies" / private
+        // mode, and an unguarded throw here would error before paint.
+        children: `(function(){if(window.location.pathname==='/')return;var t=null;try{t=localStorage.getItem('jq-theme')}catch(_){}var e=(t==='light'||t==='dark')?t:(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(e==='dark')document.documentElement.classList.add('dark')})()`,
       },
     ],
   }),
@@ -93,9 +97,9 @@ function RootComponent() {
   useEffect(() => {
     function onPreloadError() {
       const key = "jq-chunk-reload-at";
-      const last = Number(sessionStorage.getItem(key) ?? 0);
+      const last = Number(safeSessionStorage.getItem(key) ?? 0);
       if (Date.now() - last > 15_000) {
-        sessionStorage.setItem(key, String(Date.now()));
+        safeSessionStorage.setItem(key, String(Date.now()));
         window.location.reload();
       }
     }

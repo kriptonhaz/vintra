@@ -139,15 +139,24 @@ function InkGrid() {
   );
 }
 
-/** Soft radial glow orb. Position via className. */
-function Glow({ className }: { className: string }) {
+/**
+ * Soft glow orb. Size/position via className, color via `color`.
+ *
+ * Uses a radial-gradient instead of a `blur-[120px]` filter. A large blur
+ * forces the GPU to allocate a huge offscreen texture per orb; several of
+ * them (some inside below-the-fold sections) exhausted the GPU/memory budget
+ * on real iPhones, so iOS dropped the section layers and the page rendered
+ * blank / cut off below the hero (the simulator's GPU had enough headroom to
+ * hide it). A gradient paints for almost free and needs no compositing layer.
+ */
+function Glow({ className, color }: { className: string; color: string }) {
   return (
     <div
       aria-hidden
-      className={cn(
-        "pointer-events-none absolute rounded-full blur-[120px]",
-        className,
-      )}
+      className={cn("pointer-events-none absolute rounded-full", className)}
+      style={{
+        background: `radial-gradient(ellipse at center, ${color} 0%, transparent 70%)`,
+      }}
     />
   );
 }
@@ -313,9 +322,9 @@ function HeroSection() {
   return (
     <section className="relative overflow-hidden bg-gray-950 pt-36 pb-20 lg:pt-44 lg:pb-28">
       <InkGrid />
-      <Glow className="-top-40 left-1/3 h-[460px] w-[680px] -translate-x-1/2 bg-brand-600/25" />
-      <Glow className="top-1/3 -right-32 h-96 w-96 bg-primary-700/25" />
-      <Glow className="bottom-0 right-1/4 h-64 w-64 bg-accent-500/10" />
+      <Glow className="-top-40 left-1/3 h-[460px] w-[680px] -translate-x-1/2" color="rgba(33,82,212,0.25)" />
+      <Glow className="top-1/3 -right-32 h-96 w-96" color="rgba(30,58,133,0.25)" />
+      <Glow className="bottom-0 right-1/4 h-64 w-64" color="rgba(201,162,75,0.1)" />
 
       <div className="relative mx-auto grid max-w-7xl items-center gap-16 px-4 sm:px-6 lg:grid-cols-12 lg:px-8">
         {/* Left — message */}
@@ -378,7 +387,7 @@ function HeroSection() {
 
         {/* Right — layered live-ops widgets */}
         <div className="relative mx-auto h-[440px] w-full max-w-sm lg:col-span-5 lg:max-w-none">
-          <Glow className="inset-8 bg-brand-600/20" />
+          <Glow className="inset-8" color="rgba(33,82,212,0.2)" />
           <ChatWidget className="animate-float absolute top-0 right-0 z-20 -rotate-2" />
           <OrderWidget className="animate-float-delayed absolute top-44 left-0 z-30 rotate-3" />
           <AttendanceWidget className="animate-float absolute bottom-0 right-6 z-10 rotate-1" />
@@ -689,7 +698,7 @@ function TestimonialsSection() {
           {spotlight && (
             <figure className="relative flex flex-col justify-between overflow-hidden rounded-3xl border border-white/10 bg-gray-950 p-8 lg:col-span-3 lg:p-10">
               <InkGrid />
-              <Glow className="-bottom-20 -left-20 h-56 w-56 bg-brand-600/30" />
+              <Glow className="-bottom-20 -left-20 h-56 w-56" color="rgba(33,82,212,0.3)" />
               <div className="relative">
                 <Stars className="mb-6" />
                 <blockquote className="text-xl leading-relaxed font-medium text-white sm:text-2xl">
@@ -779,7 +788,7 @@ function PlanCard({
         "relative flex flex-col rounded-3xl p-7 transition-all duration-300 hover:-translate-y-1",
         featured
           ? "bg-white shadow-2xl shadow-brand-600/30 lg:scale-105"
-          : "border border-white/10 bg-white/5 backdrop-blur hover:bg-white/[0.08]",
+          : "border border-white/10 bg-white/[0.07] hover:bg-white/[0.1]",
       )}
     >
       {featured && featuredBadge && (
@@ -851,8 +860,8 @@ function PricingSection() {
       className="relative scroll-mt-24 overflow-hidden bg-gray-950 py-24 lg:py-32"
     >
       <InkGrid />
-      <Glow className="-top-32 left-1/2 h-80 w-[640px] -translate-x-1/2 bg-brand-600/25" />
-      <Glow className="bottom-0 -left-24 h-64 w-64 bg-accent-500/10" />
+      <Glow className="-top-32 left-1/2 h-80 w-[640px] -translate-x-1/2" color="rgba(33,82,212,0.25)" />
+      <Glow className="bottom-0 -left-24 h-64 w-64" color="rgba(201,162,75,0.1)" />
 
       <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <Reveal>
@@ -902,7 +911,7 @@ function PricingSection() {
         <div className="mt-12 text-center">
           <a
             href="/pricing"
-            className="group inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-6 py-3 text-sm font-bold text-white backdrop-blur transition-colors hover:bg-white/10"
+            className="group inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.08] px-6 py-3 text-sm font-bold text-white transition-colors hover:bg-white/[0.12]"
           >
             {t("landing.pricing.mainCta")}
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />

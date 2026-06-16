@@ -20,6 +20,8 @@
  * printer. The first hit is cached in localStorage so subsequent
  * connects skip the loop.
  */
+import { safeLocalStorage } from '@/lib/safe-storage'
+
 const CANDIDATE_PAIRS: ReadonlyArray<{ service: string; writeChar: string }> = [
   // RPP02N (Rongta / GoojPrt) — verified on the test unit.
   {
@@ -90,10 +92,9 @@ export function isWebBluetoothSupported(): boolean {
 }
 
 export function getSavedPrinter(): SavedPrinter | null {
-  if (typeof localStorage === 'undefined') return null
+  const raw = safeLocalStorage.getItem(STORAGE_KEY)
+  if (!raw) return null
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
     return JSON.parse(raw) as SavedPrinter
   } catch {
     return null
@@ -101,13 +102,11 @@ export function getSavedPrinter(): SavedPrinter | null {
 }
 
 export function savePrinter(p: SavedPrinter): void {
-  if (typeof localStorage === 'undefined') return
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(p))
+  safeLocalStorage.setItem(STORAGE_KEY, JSON.stringify(p))
 }
 
 export function forgetPrinter(): void {
-  if (typeof localStorage === 'undefined') return
-  localStorage.removeItem(STORAGE_KEY)
+  safeLocalStorage.removeItem(STORAGE_KEY)
 }
 
 /**

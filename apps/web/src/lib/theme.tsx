@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useLocation } from '@tanstack/react-router'
+import { safeLocalStorage } from '@/lib/safe-storage'
 
 type Theme = 'light' | 'dark'
 
@@ -31,8 +32,11 @@ function isLightOnlyPath(path: string) {
  * user hasn't made a choice — caller should fall back to the OS.
  */
 function readStored(): Theme | null {
-  if (typeof window === 'undefined') return null
-  const v = localStorage.getItem(STORAGE_KEY)
+  // safeLocalStorage swallows the SecurityError iOS Safari throws on
+  // localStorage access under "Block All Cookies" / private mode. This
+  // runs during ThemeProvider's render (useState initializer), so an
+  // unguarded throw here blanks the entire app on those iPhones.
+  const v = safeLocalStorage.getItem(STORAGE_KEY)
   return v === 'light' || v === 'dark' ? v : null
 }
 
@@ -99,7 +103,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       const next = prev === 'light' ? 'dark' : 'light'
       // Persist — any explicit toggle locks in the user's choice and
       // stops system-following.
-      localStorage.setItem(STORAGE_KEY, next)
+      safeLocalStorage.setItem(STORAGE_KEY, next)
       setIsFollowingSystem(false)
       return next
     })

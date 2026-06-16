@@ -32,8 +32,9 @@ const useIsoLayoutEffect =
  *   can animate `width` between them.
  *
  * SSR-safe: index starts at 0 on both server and first client paint, so
- * there's no hydration mismatch. The interval only starts in an effect and
- * respects `prefers-reduced-motion` (static first word, no rolling).
+ * there's no hydration mismatch. The interval only starts in an effect, after
+ * mount. It rolls regardless of `prefers-reduced-motion` (matching the
+ * marquee strip).
  */
 export function SlotText({
   words,
@@ -45,9 +46,21 @@ export function SlotText({
   const measurers = React.useRef<(HTMLSpanElement | null)[]>([]);
   const [widths, setWidths] = React.useState<number[]>([]);
 
-  // Measure each word's rendered width, and re-measure when the webfont
-  // finishes loading or the viewport changes the responsive font size.
+  // The server and the first client paint render a PLAIN static word (see the
+  // early return below). The slot-reel markup — absolutely-positioned
+  // measurer spans + a stack of transformed reel spans — only mounts after
+  // hydration. Why: that structure hydrated inconsistently on iOS Safari 26,
+  // throwing "Hydration failed because the server rendered HTML didn't match
+  // the client", which wedged React (no effects ran) and blanked the entire
+  // page below the hero. Keeping the hydrated HTML trivially simple makes a
+  // mismatch impossible; the animation is purely a post-hydration enhancement.
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+
+  // Measure each word's rendered width, and re-measure when the reel mounts,
+  // the webfont finishes loading, or the viewport changes the font size.
   useIsoLayoutEffect(() => {
+    if (!mounted) return;
     const measure = () =>
       setWidths(
         measurers.current.map((el) =>
@@ -67,24 +80,35 @@ export function SlotText({
       cancelled = true;
       window.removeEventListener("resize", measure);
     };
-  }, [words.join("|")]);
+  }, [words.join("|"), mounted]);
 
   React.useEffect(() => {
+    if (!mounted) return;
     if (words.length <= 1) return;
 
-    const reducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-    if (reducedMotion) return;
-
+    // Rolls regardless of `prefers-reduced-motion` — kept consistent with the
+    // marquee strip, which also always animates. (The animation is a small,
+    // GPU-cheap text transform, not a motion-sickness risk like parallax.)
     const id = setInterval(
       () => setIndex((i) => (i + 1) % words.length),
       interval,
     );
     return () => clearInterval(id);
-  }, [words.length, interval]);
+  }, [words.length, interval, mounted]);
 
   const measuredWidth = widths[index];
+
+  // SSR + first client paint: a plain inline word. Identical on server and
+  // client, so hydration can't mismatch. The animated reel below replaces it
+  // after mount. `words[0]` is also the reel's resting word, so there's no
+  // visible jump when the reel takes over.
+  if (!mounted) {
+    return (
+      <span className={cn("whitespace-nowrap", wordClassName, className)}>
+        {words[0]}
+      </span>
+    );
+  }
 
   return (
     <span
@@ -94,10 +118,10 @@ export function SlotText({
       // below (150%) sends waiting words well past this margin so they
       // stay hidden during the roll.
       className={cn(
-        "relative inline-block overflow-clip align-bottom transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+        "relative inline-block overflow-clip align-bottom transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
         className,
       )}
-      style={{ overflowClipMargin: "0.3em", ...(measuredWidth ? { width: measuredWidth } : {}) }}
+      style={{ overflowClipMargin: "0.5em", ...(measuredWidth ? { width: measuredWidth } : {}) }}
       aria-label={words[0]}
     >
       {/* In-flow sizer: reserves line height always, and the intrinsic
@@ -136,7 +160,7 @@ export function SlotText({
             // paints the descender (g, j, p, y); with a tight line-height the
             // glyph otherwise dips below the box and renders transparent.
             className={cn(
-              "absolute top-0 left-0 whitespace-nowrap pb-[0.25em] transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+              "absolute top-0 left-0 whitespace-nowrap pb-[0.35em] transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
               wordClassName,
             )}
             style={{

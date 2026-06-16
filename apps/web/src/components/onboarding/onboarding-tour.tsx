@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { safeLocalStorage } from '@/lib/safe-storage'
 
 interface TourStep {
   icon: typeof Calculator
@@ -93,7 +94,7 @@ export function useOnboardingTour(tenantId: string | null | undefined) {
   React.useEffect(() => {
     if (!tenantId) return
     if (typeof window === 'undefined') return
-    const done = window.localStorage.getItem(tourKey(tenantId))
+    const done = safeLocalStorage.getItem(tourKey(tenantId))
     if (!done) {
       // Defer to next tick so the page paints first; the modal then
       // animates in cleanly instead of flashing on first frame.
@@ -103,8 +104,8 @@ export function useOnboardingTour(tenantId: string | null | undefined) {
   }, [tenantId])
 
   const dismissForever = React.useCallback(() => {
-    if (tenantId && typeof window !== 'undefined') {
-      window.localStorage.setItem(tourKey(tenantId), '1')
+    if (tenantId) {
+      safeLocalStorage.setItem(tourKey(tenantId), '1')
     }
     setOpen(false)
   }, [tenantId])

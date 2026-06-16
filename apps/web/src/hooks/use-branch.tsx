@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { listAccessibleBranches } from '@/server/functions/attendance-branches'
+import { safeLocalStorage } from '@/lib/safe-storage'
 
 /**
  * Global "which branch am I operating" selection — the Qasir-style
@@ -64,10 +65,7 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
     if (branches.length === 0) return
     setSelected((prev) => {
       if (prev && branches.some((b) => b.id === prev)) return prev
-      const stored =
-        typeof window !== 'undefined'
-          ? window.localStorage.getItem(STORAGE_KEY)
-          : null
+      const stored = safeLocalStorage.getItem(STORAGE_KEY)
       if (stored && branches.some((b) => b.id === stored)) return stored
       return (branches.find((b) => b.isMain) ?? branches[0]!).id
     })
@@ -75,9 +73,7 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
 
   const setSelectedBranchId = useCallback((id: string) => {
     setSelected(id)
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, id)
-    }
+    safeLocalStorage.setItem(STORAGE_KEY, id)
   }, [])
 
   const value = useMemo<BranchContextValue>(() => {

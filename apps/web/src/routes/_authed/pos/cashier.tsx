@@ -38,6 +38,7 @@ import { TutupKasModal } from '@/components/pos/cash/tutup-kas-modal'
 import { StaleSessionModal } from '@/components/pos/cash/stale-session-modal'
 import { useToast } from '@/components/ui/toast'
 import { formatRupiah } from '@/lib/currency'
+import { safeLocalStorage, safeSessionStorage } from '@/lib/safe-storage'
 import { useCurrentUser } from '@/hooks/use-permissions'
 import { useBranch } from '@/hooks/use-branch'
 import type { POSPaymentMethod } from '@vintra/shared'
@@ -304,9 +305,8 @@ function CashierPage() {
   // every render.
   const [bannerDismissed, setBannerDismissed] = React.useState(true)
   React.useEffect(() => {
-    if (typeof window === 'undefined') return
     setBannerDismissed(
-      window.localStorage.getItem('jq_peti_kas_banner_dismissed') === '1',
+      safeLocalStorage.getItem('jq_peti_kas_banner_dismissed') === '1',
     )
   }, [])
 
@@ -430,8 +430,8 @@ function CashierPage() {
       // include `ingredient_consumption`. Show a one-time-per-session
       // toast inviting upgrade — sessionStorage flag prevents repeat
       // nags after the first dismissal in this browser session.
-      if (data.recipeNudge && !sessionStorage.getItem('jq_recipe_nudge_seen')) {
-        sessionStorage.setItem('jq_recipe_nudge_seen', '1')
+      if (data.recipeNudge && !safeSessionStorage.getItem('jq_recipe_nudge_seen')) {
+        safeSessionStorage.setItem('jq_recipe_nudge_seen', '1')
         toast({
           title: 'Auto-deduct bahan tersedia di paket Toko',
           description:
@@ -860,9 +860,7 @@ function CashierPage() {
   // backing this live above the early returns; this is just the
   // derived flag + dismiss handler.
   function dismissBanner() {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('jq_peti_kas_banner_dismissed', '1')
-    }
+    safeLocalStorage.setItem('jq_peti_kas_banner_dismissed', '1')
     setBannerDismissed(true)
   }
   const showBanner = cashDrawerEnabled && !bannerDismissed
