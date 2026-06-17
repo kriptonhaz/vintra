@@ -95,6 +95,7 @@ const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
       { labelKey: 'admin.navReferralAccess', href: '/admin/referrals/access', icon: Gift },
       { labelKey: 'admin.navReferralClaims', href: '/admin/referrals/claims', icon: Gift },
       { labelKey: 'admin.navReferralConfig', href: '/admin/referrals/config', icon: Gift },
+      { labelKey: 'admin.navMarketing', href: '/admin/marketing', icon: Megaphone },
     ],
   },
   {

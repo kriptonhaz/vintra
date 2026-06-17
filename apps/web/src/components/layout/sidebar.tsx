@@ -421,6 +421,10 @@ export function Sidebar({ isOpen, onClose, onLogout, user, compact }: SidebarPro
     // allowlist — off-list tenants see no entry at all.
     if (item.feature === "referral" && currentUser?.referralAccess !== true)
       return false;
+    // `feature: 'marketing'` gates the Marketing entry on the internal
+    // marketing-agent flag — only enrolled agents see it.
+    if (item.feature === "marketing" && currentUser?.marketingAgent !== true)
+      return false;
     return true;
   });
 

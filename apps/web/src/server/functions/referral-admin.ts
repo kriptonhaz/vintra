@@ -8,6 +8,8 @@ import {
   referralCodes,
   tenantPayoutMethods,
   tenants,
+  marketingAgents,
+  tenantMembers,
   platformAdminAuditLogs,
 } from '@vintra/db/schema'
 import { and, eq, desc, sql, gt } from 'drizzle-orm'
@@ -57,6 +59,16 @@ export const adminListClaimRequests = createServerFn({ method: 'POST' })
         tenantId: referralClaimRequests.tenantId,
         tenantName: tenants.businessName,
         tenantSlug: tenants.slug,
+        // 'tenant' | 'agent' — drives the claimant badge in the UI.
+        ownerType: referralClaimRequests.ownerType,
+        // Display name of whoever submitted the claim: the tenant's business
+        // name, or (for agent claims) the agent member's full name.
+        claimantName: sql<string>`CASE
+          WHEN ${referralClaimRequests.ownerType} = 'agent'
+          THEN COALESCE(NULLIF(TRIM(CONCAT(${tenantMembers.firstName}, ' ', ${tenantMembers.lastName})), ''), 'Agen Marketing')
+          ELSE ${tenants.businessName}
+        END`,
+        agentRole: marketingAgents.role,
         totalAmountIdr: referralClaimRequests.totalAmountIdr,
         status: referralClaimRequests.status,
         submittedAt: referralClaimRequests.submittedAt,
@@ -68,6 +80,14 @@ export const adminListClaimRequests = createServerFn({ method: 'POST' })
       .from(referralClaimRequests)
       .leftJoin(tenants, eq(tenants.id, referralClaimRequests.tenantId))
       .leftJoin(tenantPayoutMethods, eq(tenantPayoutMethods.id, referralClaimRequests.payoutMethodId))
+      .leftJoin(marketingAgents, eq(marketingAgents.id, referralClaimRequests.ownerAgentId))
+      .leftJoin(
+        tenantMembers,
+        and(
+          eq(tenantMembers.userId, marketingAgents.userId),
+          eq(tenantMembers.tenantId, marketingAgents.tenantId),
+        ),
+      )
       .where(whereExpr)
       .orderBy(
         // Submitted (= action needed) bubbles to top, then newest first.
@@ -88,6 +108,13 @@ export const adminGetClaimRequest = createServerFn({ method: 'POST' })
         tenantId: referralClaimRequests.tenantId,
         tenantName: tenants.businessName,
         tenantSlug: tenants.slug,
+        ownerType: referralClaimRequests.ownerType,
+        claimantName: sql<string>`CASE
+          WHEN ${referralClaimRequests.ownerType} = 'agent'
+          THEN COALESCE(NULLIF(TRIM(CONCAT(${tenantMembers.firstName}, ' ', ${tenantMembers.lastName})), ''), 'Agen Marketing')
+          ELSE ${tenants.businessName}
+        END`,
+        agentRole: marketingAgents.role,
         totalAmountIdr: referralClaimRequests.totalAmountIdr,
         status: referralClaimRequests.status,
         submittedAt: referralClaimRequests.submittedAt,
@@ -102,6 +129,14 @@ export const adminGetClaimRequest = createServerFn({ method: 'POST' })
       .from(referralClaimRequests)
       .leftJoin(tenants, eq(tenants.id, referralClaimRequests.tenantId))
       .leftJoin(tenantPayoutMethods, eq(tenantPayoutMethods.id, referralClaimRequests.payoutMethodId))
+      .leftJoin(marketingAgents, eq(marketingAgents.id, referralClaimRequests.ownerAgentId))
+      .leftJoin(
+        tenantMembers,
+        and(
+          eq(tenantMembers.userId, marketingAgents.userId),
+          eq(tenantMembers.tenantId, marketingAgents.tenantId),
+        ),
+      )
       .where(eq(referralClaimRequests.id, data.id))
       .limit(1)
 
@@ -191,8 +226,8 @@ export const adminMarkClaimPaid = createServerFn({ method: 'POST' })
         metadata: { claimRequestId: data.id, totalAmountIdr: request.totalAmountIdr },
       })
 
-      // Notify the tenant outside the tx (best-effort).
-      void notifyTenantClaimUpdate(request.tenantId, 'paid', request.totalAmountIdr)
+      // Notify the claimant outside the tx (best-effort).
+      void notifyClaimUpdate(request, 'paid')
 
       return { id: request.id, alreadyPaid: false }
     })
@@ -251,21 +286,71 @@ export const adminRejectClaim = createServerFn({ method: 'POST' })
         },
       })
 
-      void notifyTenantClaimUpdate(request.tenantId, 'rejected', request.totalAmountIdr, data.adminNotes)
+      void notifyClaimUpdate(request, 'rejected', data.adminNotes)
 
       return { id: request.id, alreadyRejected: false }
     })
   })
 
-async function notifyTenantClaimUpdate(
-  tenantId: string,
+/**
+ * Resolve the auth email + display name of a marketing agent (the claimant
+ * for agent-owned claims), via marketing_agents → auth.users.
+ */
+async function getAgentEmail(
+  agentId: string,
+): Promise<{ email: string; name: string } | null> {
+  const [ag] = await db
+    .select({ userId: marketingAgents.userId, tenantId: marketingAgents.tenantId })
+    .from(marketingAgents)
+    .where(eq(marketingAgents.id, agentId))
+    .limit(1)
+  if (!ag) return null
+
+  const [member] = await db
+    .select({ firstName: tenantMembers.firstName, lastName: tenantMembers.lastName })
+    .from(tenantMembers)
+    .where(
+      and(
+        eq(tenantMembers.userId, ag.userId),
+        eq(tenantMembers.tenantId, ag.tenantId),
+      ),
+    )
+    .limit(1)
+
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase.auth.admin.getUserById(ag.userId)
+  if (error || !data.user?.email) return null
+  const memberName = [member?.firstName, member?.lastName].filter(Boolean).join(' ').trim()
+  return {
+    email: data.user.email,
+    name:
+      memberName ||
+      (data.user.user_metadata?.full_name as string | undefined) ||
+      '',
+  }
+}
+
+/**
+ * Notify whoever submitted a claim. Tenant claims → the tenant owner;
+ * agent (internal marketing) claims → the agent themselves. Best-effort.
+ */
+async function notifyClaimUpdate(
+  request: {
+    ownerType: string
+    ownerAgentId: string | null
+    tenantId: string
+    totalAmountIdr: string
+  },
   outcome: 'paid' | 'rejected',
-  totalAmountIdr: string,
   reason?: string,
 ) {
   try {
-    const owner = await getTenantOwnerEmail(tenantId)
+    const owner =
+      request.ownerType === 'agent' && request.ownerAgentId
+        ? await getAgentEmail(request.ownerAgentId)
+        : await getTenantOwnerEmail(request.tenantId)
     if (!owner) return
+    const totalAmountIdr = request.totalAmountIdr
 
     const amount = formatRupiahEmail(parseFloat(totalAmountIdr))
     if (outcome === 'paid') {

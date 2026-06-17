@@ -32,6 +32,7 @@ import {
   posSettings,
   waSettings,
   tenantReferralSettings,
+  marketingAgents,
 } from '@vintra/db/schema'
 import { eq, and, sql } from 'drizzle-orm'
 import { requireAuth, resolveRoleAndPermissions } from '../middleware/auth'
@@ -463,6 +464,28 @@ export const getCurrentUser = createServerFn().handler(async () => {
     referralAccess = refRow?.enabled === true
   }
 
+  // Internal marketing program: drives the Marketing sidebar entry +
+  // /marketing route guard. An agent is a member of an internal tenant
+  // enrolled in marketing_agents (scoped per userId, not per tenant).
+  let marketingAgent = false
+  let marketingRole: 'head' | 'staff' | null = null
+  {
+    const [agentRow] = await db
+      .select({ role: marketingAgents.role })
+      .from(marketingAgents)
+      .where(
+        and(
+          eq(marketingAgents.userId, user.id),
+          eq(marketingAgents.isActive, true),
+        ),
+      )
+      .limit(1)
+    if (agentRow) {
+      marketingAgent = true
+      marketingRole = agentRow.role as 'head' | 'staff'
+    }
+  }
+
   // Surface the user's linked auth providers so the client can render
   // the right account-management UI: change-password vs. set-password.
   const identities = user.identities ?? []
@@ -478,6 +501,8 @@ export const getCurrentUser = createServerFn().handler(async () => {
     tenant: tenantInfo,
     moduleSubscriptions,
     referralAccess,
+    marketingAgent,
+    marketingRole,
     role: impersonating ? 'owner' : (membership[0]?.role ?? 'owner'),
     roleKey: resolvedRoleKey ?? membership[0]?.role ?? 'owner',
     permissions: userPermissions,

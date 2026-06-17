@@ -67,26 +67,54 @@ export async function creditReferralCommissionIfApplicable(
     if (att.referrerTenantId === refereeTenantId) return // defensive
 
     const invoiceAmount = Number.parseFloat(amountIdr)
-    const commissionPct = Number.parseFloat(att.commissionPctSnapshot)
-    if (!Number.isFinite(invoiceAmount) || !Number.isFinite(commissionPct)) {
-      return
-    }
-    const commissionAmount = (invoiceAmount * commissionPct) / 100
-    if (commissionAmount <= 0) return
+    if (!Number.isFinite(invoiceAmount) || invoiceAmount <= 0) return
 
     const [cfg] = await tx.select().from(referralGlobalConfig).limit(1)
     const clawbackDays = cfg?.clawbackDays ?? 14
     const pendingUntil = new Date(now)
     pendingUntil.setDate(pendingUntil.getDate() + clawbackDays)
 
-    await tx.insert(referralCommissions).values({
+    // Build the commission rows for this payment.
+    //   - tenant referral → one row credited to the referrer tenant
+    //   - agent referral  → the staff's commission, plus the head's override
+    //     (when the referrer was a staff), as two independently-claimable rows
+    // Each row uses the percentages SNAPSHOTTED on the attribution at signup,
+    // so later re-allocation never changes historical credits.
+    type Row = typeof referralCommissions.$inferInsert
+    const base = {
       attributionId: att.id,
       referrerTenantId: att.referrerTenantId,
-      amountIdr: commissionAmount.toFixed(2),
       sourceInvoiceId: invoiceId,
-      status: 'pending',
+      status: 'pending' as const,
       pendingUntil,
-    })
+    }
+    const rows: Row[] = []
+    const addRow = (
+      pctRaw: string | null,
+      beneficiaryType: 'tenant' | 'agent',
+      beneficiaryAgentId: string | null,
+    ) => {
+      if (pctRaw === null) return
+      const pct = Number.parseFloat(pctRaw)
+      if (!Number.isFinite(pct)) return
+      const amount = (invoiceAmount * pct) / 100
+      if (amount <= 0) return
+      rows.push({ ...base, beneficiaryType, beneficiaryAgentId, amountIdr: amount.toFixed(2) })
+    }
+
+    if (att.ownerType === 'agent') {
+      // Staff's commission (or the head's own-code commission).
+      addRow(att.commissionPctSnapshot, 'agent', att.staffAgentId)
+      // Head's override on a staff's referral.
+      if (att.headAgentId) {
+        addRow(att.headOverridePctSnapshot, 'agent', att.headAgentId)
+      }
+    } else {
+      addRow(att.commissionPctSnapshot, 'tenant', null)
+    }
+
+    if (rows.length === 0) return
+    await tx.insert(referralCommissions).values(rows)
   } catch (err) {
     // Never throw — a glitch here must not roll back the financial
     // transaction. Log so we can investigate + backfill if it

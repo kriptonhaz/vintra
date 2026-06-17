@@ -30,6 +30,7 @@ export const validateReferralCode = createServerFn({ method: 'POST' })
         discountPct: referralCodes.discountPct,
         isActive: referralCodes.isActive,
         maxClaims: referralCodes.maxClaims,
+        ownerType: referralCodes.ownerType,
         referrerName: tenants.businessName,
         // Aggregated alongside the lookup so we only do a single round
         // trip. NULL if no attributions exist yet — count() returns 0.
@@ -57,10 +58,15 @@ export const validateReferralCode = createServerFn({ method: 'POST' })
       return { valid: false as const, reason: 'quota_full' as const }
     }
 
+    // For agent (internal marketing) codes, never leak the internal tenant's
+    // business name — show a neutral partner label instead.
+    const referrerName =
+      row.ownerType === 'agent' ? 'Mitra Vintra' : (row.referrerName ?? '')
+
     return {
       valid: true as const,
       code: row.code,
       discountPct: row.discountPct,
-      referrerName: row.referrerName ?? '',
+      referrerName,
     }
   })

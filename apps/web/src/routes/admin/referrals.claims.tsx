@@ -146,8 +146,24 @@ function AdminClaimsPage() {
                       {formatDate(r.submittedAt, 'dd MMM yyyy HH:mm')}
                     </TableCell>
                     <TableCell>
-                      <div className="font-medium">{r.tenantName ?? '—'}</div>
-                      {r.tenantSlug && (
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{r.claimantName ?? r.tenantName ?? '—'}</span>
+                        <span
+                          className={
+                            'rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ' +
+                            (r.ownerType === 'agent'
+                              ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400')
+                          }
+                        >
+                          {r.ownerType === 'agent'
+                            ? r.agentRole === 'head'
+                              ? 'Kepala'
+                              : 'Marketing'
+                            : 'Tenant'}
+                        </span>
+                      </div>
+                      {r.ownerType !== 'agent' && r.tenantSlug && (
                         <div className="text-xs text-gray-500 dark:text-gray-400">
                           {r.tenantSlug}
                         </div>
@@ -291,7 +307,10 @@ function ClaimDetailSheet({
         <SheetDescription>
           {request
             ? t('admin.referralClaims.detail.fromTpl', {
-                tenant: request.tenantName ?? t('admin.referralClaims.detail.tenantFallback'),
+                tenant:
+                  request.claimantName ??
+                  request.tenantName ??
+                  t('admin.referralClaims.detail.tenantFallback'),
                 amount: formatRupiah(parseFloat(request.totalAmountIdr)),
               })
             : t('admin.referralClaims.detail.loading')}

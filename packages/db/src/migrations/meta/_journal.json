@@ -967,6 +967,20 @@
       "when": 1786881600000,
       "tag": "0137_inventory_realtime_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1786968000000,
+      "tag": "0138_marketing_commission",
+      "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1787054400000,
+      "tag": "0139_marketing_cap_config",
+      "breakpoints": true
     }
   ]
 }

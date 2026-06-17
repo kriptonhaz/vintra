@@ -31,6 +31,14 @@ export const tenants = pgTable('tenants', {
    */
   situsMode: text('situs_mode').notNull().default('single'),
   onboardingCompleted: boolean('onboarding_completed').notNull().default(false),
+  /**
+   * Marks Vintra's own internal org (e.g. "mantra maker"). Members of an
+   * internal tenant can be enrolled as marketing agents (see
+   * `marketing_agents`) who earn commission for referring paying tenants.
+   * A normal business tenant is never internal. Expected to be true for at
+   * most a handful of tenants.
+   */
+  isInternal: boolean('is_internal').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })

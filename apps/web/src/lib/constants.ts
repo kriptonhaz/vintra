@@ -419,6 +419,16 @@ export const SETTINGS_NAV: Array<NavItem & { permission?: string }> = [
     permission: 'members.read',
     feature: 'referral',
   },
+  // Internal marketing program. `feature: 'marketing'` gates this entry on
+  // `currentUser.marketingAgent` — only members of an internal tenant who
+  // are enrolled as agents see it. No permission requirement: an agent's
+  // tenant role is irrelevant to whether they sell + earn commission.
+  {
+    label: 'Marketing',
+    href: '/marketing',
+    icon: Megaphone,
+    feature: 'marketing',
+  },
   { label: 'Anggota Tim', href: '/settings/members', icon: Users, permission: 'members.read' },
   { label: 'Peran & Akses', href: '/settings/roles', icon: ShieldCheck, permission: 'settings.manage' },
   { label: 'Pengumuman', href: '/settings/announcements', icon: Megaphone, permission: 'announcements.manage' },
