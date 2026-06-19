@@ -9,6 +9,7 @@ import {
   updateBranchReceipt,
   updatePOSCashSettings,
   updateBranchCashStaleConfig,
+  updatePOSAdhocSetting,
 } from '@/server/functions/pos'
 import {
   listVoidCategories,
@@ -148,6 +149,12 @@ function POSSettingsPage() {
     return (
       <div className="space-y-6">
         <ModuleBreadcrumb />
+        {/* Item Lain is ungated — available even on the free tier, so it
+            renders above the upgrade wall that hides everything else. */}
+        <AdhocItemsSection
+          initialEnabled={data.settings?.adhocItemsEnabled ?? false}
+          onSaved={() => router.invalidate()}
+        />
         <div className="rounded-xl border border-warning-200 bg-warning-50 p-6 text-sm text-warning-900">
           Pengaturan kustom (logo struk, footer, pajak, metode pembayaran)
           tersedia di paket Toko ke atas. Upgrade dari halaman billing untuk
@@ -169,6 +176,11 @@ function POSSettingsPage() {
           Kustomisasi struk dan metode pembayaran yang aktif di kasir.
         </p>
       </div>
+
+      <AdhocItemsSection
+        initialEnabled={data.settings?.adhocItemsEnabled ?? false}
+        onSaved={() => router.invalidate()}
+      />
 
       <ReceiptScopeSection
         tenantDefault={{
@@ -930,6 +942,85 @@ function CashStaleScopeForm({
         </Button>
       </div>
     </div>
+  )
+}
+
+/**
+ * "Item Lain" (ad-hoc line) anti-fraud toggle. Self-contained — owns
+ * its state + mutation and calls the ungated `updatePOSAdhocSetting` so
+ * it works on every tier, including free (rendered above the upgrade
+ * wall). Default OFF: ad-hoc lines bypass the catalog + inventory, so a
+ * tenant opts IN only when they sell services / one-off items.
+ */
+function AdhocItemsSection({
+  initialEnabled,
+  onSaved,
+}: {
+  initialEnabled: boolean
+  onSaved: () => void
+}) {
+  const { toast } = useToast()
+  const [enabled, setEnabled] = React.useState(initialEnabled)
+  const save = useMutation({
+    mutationFn: (next: boolean) =>
+      updatePOSAdhocSetting({ data: { enabled: next } }),
+    onSuccess: () => {
+      toast({ title: 'Pengaturan disimpan', variant: 'success' })
+      onSaved()
+    },
+    onError: (err: Error, next) => {
+      // Revert the optimistic flip so the switch reflects the real state.
+      setEnabled(!next)
+      toast({
+        title: 'Gagal menyimpan',
+        description: err.message,
+        variant: 'error',
+      })
+    },
+  })
+
+  function toggle() {
+    const next = !enabled
+    setEnabled(next)
+    save.mutate(next)
+  }
+
+  return (
+    <Section title='Item Lain (item di luar katalog)'>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Saat aktif, kasir bisa menambah "Item Lain" — item manual
+            dengan nama dan harga bebas, di luar katalog produk. Cocok
+            untuk jasa atau penjualan satu kali.
+          </p>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            Item Lain tidak tercatat di stok inventory dan tidak terhubung
+            ke produk, sehingga lebih sulit diaudit. Matikan jika kamu
+            ingin semua penjualan tercatat lewat katalog.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Aktifkan Item Lain di kasir"
+          disabled={save.isPending}
+          onClick={toggle}
+          className={cn(
+            'relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50',
+            enabled ? 'bg-brand-600' : 'bg-gray-300 dark:bg-gray-600',
+          )}
+        >
+          <span
+            className={cn(
+              'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform',
+              enabled ? 'translate-x-5' : 'translate-x-0.5',
+            )}
+          />
+        </button>
+      </div>
+    </Section>
   )
 }
 

@@ -531,6 +531,7 @@ export const getPOSCashierMasters = createServerFn({ method: 'POST' })
           loyaltyRedeemRate: posSettings.loyaltyRedeemRate,
           cashDrawerEnabled: posSettings.cashDrawerEnabled,
           cashVarianceThreshold: posSettings.cashVarianceThreshold,
+          adhocItemsEnabled: posSettings.adhocItemsEnabled,
         })
         .from(posSettings)
         .where(eq(posSettings.tenantId, auth.tenantId))
@@ -617,6 +618,10 @@ export const getPOSCashierMasters = createServerFn({ method: 'POST' })
           (settings?.cashDrawerEnabled ?? true),
         varianceThreshold: Number(settings?.cashVarianceThreshold ?? 10000),
       },
+      // Anti-fraud "Item Lain" gate. Defaults false (opt-in) for
+      // tenants with no settings row yet. The cashier hides the button
+      // when false; createSale re-checks server-side.
+      allowAdhocItems: settings?.adhocItemsEnabled ?? false,
       features: limits.features,
     }
   })
@@ -1673,10 +1678,23 @@ export const createSale = createServerFn({ method: 'POST' })
         loyaltyEarnStepAmount: posSettings.loyaltyEarnStepAmount,
         loyaltyEarnStepPoints: posSettings.loyaltyEarnStepPoints,
         loyaltyRedeemRate: posSettings.loyaltyRedeemRate,
+        adhocItemsEnabled: posSettings.adhocItemsEnabled,
       })
       .from(posSettings)
       .where(eq(posSettings.tenantId, auth.tenantId))
       .limit(1)
+
+    // Anti-fraud gate: refuse ad-hoc lines when the tenant has the
+    // "Item Lain" control switched off (default for tenants with no
+    // settings row). The cashier already hides the button, but a stale
+    // tab or a hand-crafted payload could still smuggle one in — this
+    // is the authoritative check. Throws before any sale row is written.
+    if (
+      !(settings?.adhocItemsEnabled ?? false) &&
+      prepared.some((l) => l.isAdhoc)
+    ) {
+      throw new Error('Fitur "Item Lain" tidak aktif untuk toko ini.')
+    }
     // Resolve the active tax stack once so both the tax math + the
     // per-sale `tax_lines` snapshot read from the same shape.
     const activeTaxes = ((settings?.taxes ?? []) as Array<{
@@ -4120,6 +4138,27 @@ export const updatePOSSettings = createServerFn({ method: 'POST' })
         set: updateSet,
       })
 
+    return { success: true as const }
+  })
+
+/**
+ * Standalone toggle for the cashier "Item Lain" (ad-hoc line) control.
+ * Deliberately NOT gated on `custom_receipt` like updatePOSSettings —
+ * this is a basic anti-fraud switch every tier (including free) must be
+ * able to flip, even though the rest of the settings page is Toko+.
+ * Upserts so a free tenant with no pos_settings row yet still lands one.
+ */
+export const updatePOSAdhocSetting = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ enabled: z.boolean() }))
+  .handler(async ({ data }) => {
+    const auth = await requirePOSAccess()
+    await db
+      .insert(posSettings)
+      .values({ tenantId: auth.tenantId, adhocItemsEnabled: data.enabled })
+      .onConflictDoUpdate({
+        target: posSettings.tenantId,
+        set: { adhocItemsEnabled: data.enabled, updatedAt: new Date() },
+      })
     return { success: true as const }
   })
 

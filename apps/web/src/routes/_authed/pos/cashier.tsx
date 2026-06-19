@@ -1007,6 +1007,7 @@ function CashierPage() {
               onUpdateLine={updateLine}
               onRemoveLine={removeLine}
               onAddAdhoc={() => setAdhocOpen(true)}
+              allowAdhocItems={m.allowAdhocItems ?? false}
               onCheckout={() => setPaymentOpen(true)}
               activeAutoPromos={activeAutoPromos}
               features={m.features}

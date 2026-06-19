@@ -236,6 +236,21 @@ export const posSettings = pgTable(
       .$type<CashStaleConfig>()
       .notNull()
       .default(DEFAULT_CASH_STALE_CONFIG),
+    /**
+     * Anti-fraud control for the cashier "Item Lain" (ad-hoc line)
+     * button. When false the cashier hides the button AND createSale
+     * rejects any ad-hoc line server-side. Ad-hoc lines carry no
+     * `item_id` so they bypass the catalog + inventory entirely — an
+     * owner who wants a tight audit trail keeps this off.
+     *
+     * Default false: tenants opt IN from POS settings. Unlike the rest
+     * of the settings page (Toko+ only), this single toggle is ungated
+     * and reachable by every tier (see `updatePOSAdhocSetting`), so a
+     * free tenant is never trapped without a way to re-enable it.
+     */
+    adhocItemsEnabled: boolean('adhoc_items_enabled')
+      .notNull()
+      .default(false),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

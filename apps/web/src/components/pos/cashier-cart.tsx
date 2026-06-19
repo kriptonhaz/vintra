@@ -73,6 +73,12 @@ interface Props {
   onUpdateLine: (rowKey: string, patch: Partial<CartLine>) => void
   onRemoveLine: (rowKey: string) => void
   onAddAdhoc: () => void
+  /**
+   * Tenant's "Item Lain" (ad-hoc line) anti-fraud toggle. When false
+   * the cashier hides the button entirely — createSale also rejects
+   * ad-hoc lines server-side, so this is purely the UI affordance.
+   */
+  allowAdhocItems: boolean
   onCheckout: () => void
   /**
    * Active auto-promos (post-window filter, with item / category
@@ -169,6 +175,7 @@ export function CashierCart({
   onUpdateLine,
   onRemoveLine,
   onAddAdhoc,
+  allowAdhocItems,
   onCheckout,
   activeAutoPromos,
   features,
@@ -283,14 +290,16 @@ export function CashierCart({
               <UserCircle className="h-4 w-4" /> Pelanggan
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0"
-            onClick={onAddAdhoc}
-          >
-            <Plus className="h-4 w-4" /> Item Lain
-          </Button>
+          {allowAdhocItems && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              onClick={onAddAdhoc}
+            >
+              <Plus className="h-4 w-4" /> Item Lain
+            </Button>
+          )}
         </div>
       </div>
 
