@@ -91,7 +91,7 @@ function LogoGeneratePage() {
       const res = await generateLogo({
         data: {
           selections,
-          resolution: resolution as '1k' | '2k' | '4k',
+          resolution: resolution as '1k',
         },
       })
       setResult({ url: res.resultImageUrl, id: res.logoId })
@@ -234,37 +234,40 @@ function LogoGeneratePage() {
             </div>
           )}
 
-          {/* Resolution */}
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t('konten.resolutionLabel')}
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {status.resolutions.map((r) => (
-                <button
-                  key={r.key}
-                  type="button"
-                  onClick={() => setResolution(r.key)}
-                  className={cn(
-                    'rounded-lg border px-3 py-2 text-center transition-colors',
-                    resolution === r.key
-                      ? 'border-brand-500 bg-brand-50 dark:border-brand-400 dark:bg-brand-900/20'
-                      : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800',
-                  )}
-                >
-                  <span className="block text-sm font-semibold uppercase text-gray-900 dark:text-gray-100">
-                    {r.key}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-                    {t('konten.resCost', { count: r.credits })}
-                  </span>
-                </button>
-              ))}
+          {/* Resolution — hidden when only one tier is available (logos
+              are capped at 1K; see LOGO_RESOLUTIONS). */}
+          {status.resolutions.length > 1 && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {t('konten.resolutionLabel')}
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {status.resolutions.map((r) => (
+                  <button
+                    key={r.key}
+                    type="button"
+                    onClick={() => setResolution(r.key)}
+                    className={cn(
+                      'rounded-lg border px-3 py-2 text-center transition-colors',
+                      resolution === r.key
+                        ? 'border-brand-500 bg-brand-50 dark:border-brand-400 dark:bg-brand-900/20'
+                        : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800',
+                    )}
+                  >
+                    <span className="block text-sm font-semibold uppercase text-gray-900 dark:text-gray-100">
+                      {r.key}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                      {t('konten.resCost', { count: r.credits })}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {t('konten.resolutionHint')}
+              </p>
             </div>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {t('konten.resolutionHint')}
-            </p>
-          </div>
+          )}
 
           <Button
             variant="brand"

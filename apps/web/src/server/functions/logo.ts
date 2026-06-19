@@ -22,7 +22,7 @@ import {
 } from '@/lib/s3-storage'
 import { generateGeminiImage } from '@/lib/ai-image'
 import {
-  KONTEN_RESOLUTIONS,
+  LOGO_RESOLUTIONS,
   GEMINI_IMAGE_SIZE,
 } from '@/lib/konten-presets'
 import { getDefaultImageProvider, resolvePricing } from '@/server/lib/ai-image-provider'
@@ -185,7 +185,7 @@ export const getLogoStatus = createServerFn({ method: 'POST' }).handler(
     return {
       balance: account?.balance ?? 0,
       hasImageProvider: provider !== null,
-      resolutions: KONTEN_RESOLUTIONS.map((key) => ({
+      resolutions: LOGO_RESOLUTIONS.map((key) => ({
         key,
         credits: pricing[key].credits,
       })),
@@ -269,7 +269,7 @@ export const generateLogo = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
       selections: z.array(selectionInputSchema).default([]),
-      resolution: z.enum(KONTEN_RESOLUTIONS).default('1k'),
+      resolution: z.enum(LOGO_RESOLUTIONS).default('1k'),
     }),
   )
   .handler(async ({ data }) => {

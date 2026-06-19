@@ -10,6 +10,17 @@
 export const KONTEN_RESOLUTIONS = ['1k', '2k', '4k'] as const
 export type KontenResolution = (typeof KONTEN_RESOLUTIONS)[number]
 
+/**
+ * Logo generation is capped at 1K. The active Flash image model
+ * (Nano Banana) only renders from-scratch text-to-image logos reliably
+ * at 1K — 2K comes out washed-out and 4K returns a blank canvas. Konten
+ * and Spanduk are unaffected because they're image-to-image (a source
+ * photo anchors the output) and still use the full tier list above.
+ * Re-add 2K/4K here if the image provider is switched to a Pro model
+ * with native hi-res support.
+ */
+export const LOGO_RESOLUTIONS = ['1k'] as const
+
 export interface ResolutionTierPricing {
   credits: number
   priceUsd: string | null
