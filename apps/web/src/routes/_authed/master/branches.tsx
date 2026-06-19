@@ -182,8 +182,9 @@ function BranchesPage() {
           </h1>
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
             Kelola cabang fisik (toko/outlet) atau gudang Anda. Setiap
-            cabang bisa diaktifkan untuk modul yang berbeda — gudang
-            hanya pakai Stok, outlet penuh pakai semua.
+            cabang bisa diaktifkan untuk modul yang berbeda.
+            <br />
+            Gudang hanya pakai Stok, outlet penuh pakai semua.
           </p>
         </div>
         {atFreeCap ? (
@@ -202,7 +203,7 @@ function BranchesPage() {
             className="inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
           >
             <Plus className="h-4 w-4" />
-            Tambah Cabang via Admin
+            Tambah Cabang Hubungi Vintra
           </a>
         ) : (
           <Button
