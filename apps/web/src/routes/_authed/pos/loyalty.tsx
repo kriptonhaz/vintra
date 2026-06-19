@@ -12,6 +12,10 @@ import {
   getStampActivity,
 } from '@/server/functions/loyalty-stamps'
 import { ModuleBreadcrumb } from '@/components/layout/module-breadcrumb'
+import {
+  StampCardEditor,
+  type StampCardLayout,
+} from '@/components/loyalty/stamp-card-editor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -385,6 +389,31 @@ function StampProgramsSection() {
   )
   const [removeImage, setRemoveImage] = React.useState(false)
 
+  // Digital stamp-card editor state. `*DataUrl` = freshly picked file;
+  // `existing*Url` = presigned preview from the list payload. `cardDirty`
+  // gates whether we send card fields on save (avoids needless re-renders
+  // when the merchant only edited, say, the active flag).
+  const [cardDesignDataUrl, setCardDesignDataUrl] = React.useState<
+    string | null
+  >(null)
+  const [cardMarkDataUrl, setCardMarkDataUrl] = React.useState<string | null>(
+    null,
+  )
+  const [existingCardDesignUrl, setExistingCardDesignUrl] = React.useState<
+    string | null
+  >(null)
+  const [existingMarkUrl, setExistingMarkUrl] = React.useState<string | null>(
+    null,
+  )
+  const [cardLayout, setCardLayout] = React.useState<StampCardLayout | null>(
+    null,
+  )
+  const [removeCard, setRemoveCard] = React.useState(false)
+  const [cardRenderStatus, setCardRenderStatus] = React.useState<string | null>(
+    null,
+  )
+  const [cardDirty, setCardDirty] = React.useState(false)
+
   // Client-side pagination kicks in once the list outgrows a single
   // screen. 10/page is enough that single-tenant common cases (2–4
   // programs for Usama-style washes) never see a pager at all.
@@ -406,6 +435,14 @@ function StampProgramsSection() {
     setImageDataUrl(null)
     setExistingImageUrl(null)
     setRemoveImage(false)
+    setCardDesignDataUrl(null)
+    setCardMarkDataUrl(null)
+    setExistingCardDesignUrl(null)
+    setExistingMarkUrl(null)
+    setCardLayout(null)
+    setRemoveCard(false)
+    setCardRenderStatus(null)
+    setCardDirty(false)
   }
   function openEdit(p: NonNullable<typeof programs.data>[number]) {
     setEditing(p.id)
@@ -431,7 +468,56 @@ function StampProgramsSection() {
     setImageDataUrl(null)
     setExistingImageUrl(p.imageUrl ?? null)
     setRemoveImage(false)
+    setCardDesignDataUrl(null)
+    setCardMarkDataUrl(null)
+    setExistingCardDesignUrl(p.cardDesignUrl ?? null)
+    setExistingMarkUrl(p.stampMarkUrl ?? null)
+    setCardLayout((p.cardLayout as StampCardLayout | null) ?? null)
+    setRemoveCard(false)
+    setCardRenderStatus(p.cardRenderStatus ?? null)
+    setCardDirty(false)
   }
+
+  // Read a picked image file into a base64 data URL.
+  function readFileDataUrl(file: File, cb: (dataUrl: string) => void) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') cb(reader.result)
+    }
+    reader.readAsDataURL(file)
+  }
+  function handleCardDesignPick(file: File) {
+    readFileDataUrl(file, (url) => {
+      setCardDesignDataUrl(url)
+      setRemoveCard(false)
+      setCardDirty(true)
+    })
+  }
+  function handleCardMarkPick(file: File) {
+    readFileDataUrl(file, (url) => {
+      setCardMarkDataUrl(url)
+      setRemoveCard(false)
+      setCardDirty(true)
+    })
+  }
+  function handleCardRemove() {
+    setCardDesignDataUrl(null)
+    setCardMarkDataUrl(null)
+    setExistingCardDesignUrl(null)
+    setExistingMarkUrl(null)
+    setCardLayout(null)
+    setRemoveCard(!!existingCardDesignUrl)
+    setCardRenderStatus(null)
+    setCardDirty(true)
+  }
+  function handleCardLayoutChange(layout: StampCardLayout) {
+    setCardLayout(layout)
+    setCardDirty(true)
+  }
+  const cardDesignSrc = removeCard
+    ? null
+    : (cardDesignDataUrl ?? existingCardDesignUrl)
+  const cardMarkSrc = removeCard ? null : (cardMarkDataUrl ?? existingMarkUrl)
 
   function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -488,6 +574,12 @@ function StampProgramsSection() {
               : null,
           imageDataUrl: imageDataUrl ?? undefined,
           removeImage: removeImage || undefined,
+          cardDesignDataUrl:
+            cardDirty && cardDesignDataUrl ? cardDesignDataUrl : undefined,
+          stampMarkDataUrl:
+            cardDirty && cardMarkDataUrl ? cardMarkDataUrl : undefined,
+          cardLayout: cardDirty && cardLayout ? cardLayout : undefined,
+          removeCard: cardDirty && removeCard ? true : undefined,
         },
       }),
     onSuccess: () => {
@@ -514,6 +606,12 @@ function StampProgramsSection() {
               : null,
           imageDataUrl: imageDataUrl ?? undefined,
           removeImage: removeImage || undefined,
+          cardDesignDataUrl:
+            cardDirty && cardDesignDataUrl ? cardDesignDataUrl : undefined,
+          stampMarkDataUrl:
+            cardDirty && cardMarkDataUrl ? cardMarkDataUrl : undefined,
+          cardLayout: cardDirty && cardLayout ? cardLayout : undefined,
+          removeCard: cardDirty && removeCard ? true : undefined,
           isActive,
         },
       }),
@@ -710,6 +808,18 @@ function StampProgramsSection() {
                 </label>
               )}
             </div>
+            <StampCardEditor
+              key={editing ?? 'none'}
+              stampsRequired={Math.max(1, Number(stampsRequired) || 1)}
+              designSrc={cardDesignSrc}
+              markSrc={cardMarkSrc}
+              initialLayout={cardLayout}
+              renderStatus={cardRenderStatus}
+              onPickDesign={handleCardDesignPick}
+              onPickMark={handleCardMarkPick}
+              onRemove={handleCardRemove}
+              onLayoutChange={handleCardLayoutChange}
+            />
             <div className="space-y-1.5">
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Cakupan

@@ -981,6 +981,13 @@
       "when": 1787054400000,
       "tag": "0139_marketing_cap_config",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1787140800000,
+      "tag": "0140_loyalty_stamp_cards",
+      "breakpoints": true
     }
   ]
 }

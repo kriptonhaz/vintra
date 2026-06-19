@@ -433,7 +433,13 @@ func (h *AIReplyHandler) process(ctx context.Context, t *asynq.Task) error {
 	// customer gets the banner right after the text. Failures here are
 	// logged-not-fatal — the text reply already shipped.
 	imageMatches := matchPromoAttachments(replyText, retrieved)
+	imageMatches = append(imageMatches, matchStampCardAttachments(replyText, retrieved)...)
+	sentImageKeys := make(map[string]struct{}, len(imageMatches))
 	for _, att := range imageMatches {
+		if _, dup := sentImageKeys[att.ImageKey]; dup {
+			continue
+		}
+		sentImageKeys[att.ImageKey] = struct{}{}
 		mime := mimeFromImageKey(att.ImageKey)
 		imgMsg, imgErr := h.Q.CreateOutboundImageMessage(ctx, queries.CreateOutboundImageMessageParams{
 			TenantID:       tenantID,
@@ -607,6 +613,47 @@ func matchPromoAttachments(replyText string, snippets []rag.Snippet) []rag.Snipp
 			if strings.Contains(lower, strings.ToLower(att.Name)) {
 				out = append(out, att)
 				seen[att.ImageKey] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+// matchStampCardAttachments selects pre-rendered loyalty stamp-card
+// images to send as a follow-up. Unlike promos (which require the
+// program name to appear verbatim), a card is sent when the AI's reply
+// talks about stamps at all OR names the program — customers ask "berapa
+// stempel saya?" without echoing the program name. Capped at 2 so a
+// multi-card customer doesn't get spammed; the loyalty_stamps retriever
+// already orders by most progress first.
+func matchStampCardAttachments(replyText string, snippets []rag.Snippet) []rag.SnippetAttachment {
+	if replyText == "" {
+		return nil
+	}
+	lower := strings.ToLower(replyText)
+	mentionsStamp := strings.Contains(lower, "stempel") ||
+		strings.Contains(lower, "stamp") ||
+		strings.Contains(lower, "kartu")
+	seen := make(map[string]struct{})
+	var out []rag.SnippetAttachment
+	for _, s := range snippets {
+		if s.Source != "loyalty_stamps" {
+			continue
+		}
+		for _, att := range s.Attachments {
+			if att.ImageKey == "" {
+				continue
+			}
+			if _, dup := seen[att.ImageKey]; dup {
+				continue
+			}
+			if mentionsStamp ||
+				(att.Name != "" && strings.Contains(lower, strings.ToLower(att.Name))) {
+				out = append(out, att)
+				seen[att.ImageKey] = struct{}{}
+				if len(out) >= 2 {
+					return out
+				}
 			}
 		}
 	}

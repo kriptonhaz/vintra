@@ -1,17 +1,17 @@
 // Command api is the entrypoint for the Vintra WhatsApp + AI api
 // service. Bootstrap order:
 //
-//   1. Load .env (best-effort — missing file is fine in prod where
-//      systemd supplies env via EnvironmentFile).
-//   2. Parse + validate env (config.Parse). Boot aborts on failure.
-//   3. Configure slog (JSON in prod, text in dev).
-//   4. Open Postgres pool (pgx) + Redis client (go-redis). Both ping
-//      at construction time so bad config surfaces at boot.
-//   5. Construct Supabase verifier + tenant service (no I/O yet —
-//      these are stateless wrappers).
-//   6. Build the Fiber app (http.NewServer) with the bundled Deps.
-//   7. Listen in a goroutine. Block on a signal-cancelled ctx for
-//      graceful shutdown.
+//  1. Load .env (best-effort — missing file is fine in prod where
+//     systemd supplies env via EnvironmentFile).
+//  2. Parse + validate env (config.Parse). Boot aborts on failure.
+//  3. Configure slog (JSON in prod, text in dev).
+//  4. Open Postgres pool (pgx) + Redis client (go-redis). Both ping
+//     at construction time so bad config surfaces at boot.
+//  5. Construct Supabase verifier + tenant service (no I/O yet —
+//     these are stateless wrappers).
+//  6. Build the Fiber app (http.NewServer) with the bundled Deps.
+//  7. Listen in a goroutine. Block on a signal-cancelled ctx for
+//     graceful shutdown.
 //
 // Adding subsystems (whatsmeow, asynq) goes in this file — construct
 // them after db/redis and pass into the Deps struct.
@@ -201,6 +201,10 @@ func main() {
 		AsynqClient: asynqClient.Client,
 		AiSvc:       aiSvc,
 		Loader:      convLoader,
+	})
+	queuetasks.RegisterLoyaltyRenderCard(asynqServer.Mux(), &queuetasks.LoyaltyRenderCardHandler{
+		DB: database.Pool,
+		S3: s3Client,
 	})
 
 	// Boot-time cleanup for the wa_login_otps table. Deletes consumed

@@ -892,6 +892,21 @@ export const loyaltyStampPrograms = pgTable(
      * admin program list, cashier strip, and the situs Stamp section.
      */
     imageKey: text('image_key'),
+    /**
+     * Digital stamp-card design (JUR-xxx). `cardDesignKey` is the base
+     * card artwork the merchant uploaded; `stampMarkKey` is the mark
+     * stamped onto each filled slot. Both are permanent S3 objects
+     * (tag `kind=loyalty-card`, no lifecycle sweep). `cardLayout` holds
+     * the normalized grid the grid-overlay editor produced — the
+     * renderer multiplies the 0..1 cell centers by the real image size
+     * so editor preview and server output line up at any resolution.
+     */
+    cardDesignKey: text('card_design_key'),
+    stampMarkKey: text('stamp_mark_key'),
+    cardLayout: jsonb('card_layout').$type<StampCardLayout>(),
+    /** 'none' | 'pending' | 'ready' | 'failed' — pre-render lifecycle. */
+    cardRenderStatus: text('card_render_status').notNull().default('none'),
+    cardRenderedAt: timestamp('card_rendered_at'),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -922,8 +937,37 @@ export const loyaltyStampPrograms = pgTable(
       'loyalty_stamp_programs_reward_mode_chk',
       sql`${t.rewardMode} IN ('single', 'bundle')`,
     ),
+    cardRenderStatusChk: check(
+      'loyalty_stamp_programs_card_render_status_chk',
+      sql`${t.cardRenderStatus} IN ('none', 'pending', 'ready', 'failed')`,
+    ),
   }),
 )
+
+/**
+ * Normalized layout emitted by the grid-overlay card editor. All
+ * coordinates and sizes are fractions of the base design dimensions
+ * (0..1), making the render resolution-independent. `cells` is the
+ * source of truth for the renderer (row-major centers); `cols`/`rows`
+ * are retained so the editor can rehydrate its grid handles. `cells`
+ * length is >= the program's stampsRequired.
+ */
+export type StampCardLayout = {
+  cols: number
+  rows: number
+  /** Row-major slot centers, each a 0..1 fraction of width/height. */
+  cells: { x: number; y: number }[]
+  /** Stamp mark width as a fraction of the design width (0..1). */
+  markScale: number
+  /** Mark opacity, 0..1. */
+  markOpacity: number
+  /**
+   * Editor-only: normalized bounding rect of the grid handles, so the
+   * grid-overlay editor can rehydrate on re-open. The renderer ignores
+   * this and consumes `cells` directly.
+   */
+  grid?: { x: number; y: number; w: number; h: number }
+}
 
 /**
  * Items that qualify the program when scope = 'product_set'. One row
@@ -1052,6 +1096,40 @@ export const customerStampMovements = pgTable(
     typeChk: check(
       'customer_stamp_movements_type_chk',
       sql`${t.type} IN ('earn', 'redeem', 'adjust')`,
+    ),
+  }),
+)
+
+/**
+ * Pre-rendered stamp-card images, one row per fill state of a program.
+ * For a program needing N stamps there are N+1 rows (stampCount 0..N),
+ * each pointing at a permanent S3 object. Sending a card at runtime is
+ * a single indexed lookup by (programId, stampCount) — no compositing
+ * in the hot path. Rows are regenerated whenever the design, stamp
+ * mark, layout, or stampsRequired changes.
+ */
+export const loyaltyStampProgramCards = pgTable(
+  'loyalty_stamp_program_cards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    programId: uuid('program_id')
+      .references(() => loyaltyStampPrograms.id, { onDelete: 'cascade' })
+      .notNull(),
+    /** Number of filled stamps this image represents (0..stampsRequired). */
+    stampCount: integer('stamp_count').notNull(),
+    imageKey: text('image_key').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    programCountUnique: unique(
+      'loyalty_stamp_program_cards_program_count_unique',
+    ).on(t.programId, t.stampCount),
+    stampCountChk: check(
+      'loyalty_stamp_program_cards_stamp_count_chk',
+      sql`${t.stampCount} >= 0`,
     ),
   }),
 )

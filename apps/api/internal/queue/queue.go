@@ -2,11 +2,11 @@
 //
 // Task types live under named queues:
 //
-//   wa:send         — outbound messages (concurrency 2)
-//   wa:incoming     — inbound persistence (concurrency 2)
-//   wa:reaction     — emoji-reaction persistence (concurrency 1, JUR-80)
-//   wa:lid_backfill — rename LID→PN on wa_contacts + wa_messages (concurrency 1, JUR-93)
-//   ai:reply        — AI auto-reply generation (concurrency 1)
+//	wa:send         — outbound messages (concurrency 2)
+//	wa:incoming     — inbound persistence (concurrency 2)
+//	wa:reaction     — emoji-reaction persistence (concurrency 1, JUR-80)
+//	wa:lid_backfill — rename LID→PN on wa_contacts + wa_messages (concurrency 1, JUR-93)
+//	ai:reply        — AI auto-reply generation (concurrency 1)
 //
 // All use the same Redis instance (REDIS_URL). asynq's queue names
 // aren't restricted by character — colons work fine here (unlike
@@ -30,6 +30,7 @@ const (
 	QueueWAReaction    = "wa:reaction"
 	QueueWALidBackfill = "wa:lid_backfill"
 	QueueAIReply       = "ai:reply"
+	QueueLoyaltyRender = "loyalty:render"
 )
 
 // Task type names. Match the queue names 1:1 here EXCEPT for
@@ -42,6 +43,10 @@ const (
 	TaskWAReaction    = "wa:reaction"
 	TaskWALidBackfill = "wa:lid_backfill"
 	TaskAIReply       = "ai:reply"
+	// Pre-render every fill state of a loyalty stamp card. Heavy but
+	// infrequent (only on program design/layout change), so it gets its
+	// own low-concurrency queue rather than competing with sends.
+	TaskLoyaltyRenderCard = "loyalty:render_card"
 )
 
 // Client wraps asynq.Client for the producer side. Used by HTTP
@@ -91,6 +96,7 @@ func NewServer(redisURL string) (*Server, error) {
 			QueueWAReaction:    1,
 			QueueWALidBackfill: 1,
 			QueueAIReply:       1,
+			QueueLoyaltyRender: 1,
 		},
 
 		// Exponential backoff for retries: 5s, 25s, 125s, ... capped

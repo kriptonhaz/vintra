@@ -168,6 +168,15 @@ func NewServer(deps Deps) *fiber.App {
 	systemMetrics := handlers.NewSystemMetrics("/home/ubuntu/prod/vintra-api/data")
 	v1.Get("/internal/system-metrics", internalMW, systemMetrics.Get)
 
+	// Loyalty stamp-card render trigger. The web calls this after a
+	// merchant saves a card design; it enqueues loyalty:render_card to
+	// pre-render every fill state into S3.
+	loyaltyInternal := handlers.NewLoyaltyInternal(
+		deps.Queries, deps.DBPool, deps.AsynqClient,
+	)
+	v1.Post("/internal/loyalty/render-card", internalMW, loyaltyInternal.RenderCard)
+	v1.Post("/internal/loyalty/send-card", internalMW, loyaltyInternal.SendCard)
+
 	// Per-instance RAG tool toggles for tenants.
 	ragInstance := handlers.NewRagInstance(deps.Queries)
 	v1.Get("/wa/instances/:id/rag-tools", authMW, tenantMW, ragInstance.List)

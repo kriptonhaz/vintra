@@ -795,10 +795,14 @@ func (r *loyaltyStampsRetriever) Retrieve(ctx context.Context, db queries.DBTX, 
 			csc.current_stamps,
 			lsp.stamps_required,
 			lsp.reward_mode,
-			COALESCE(ii.name, '') AS reward_item_name
+			COALESCE(ii.name, '') AS reward_item_name,
+			COALESCE(lspc.image_key, '') AS card_image_key
 		FROM customer_stamp_cards csc
 		JOIN loyalty_stamp_programs lsp ON lsp.id = csc.program_id
 		LEFT JOIN inventory_items ii ON ii.id = lsp.reward_item_id
+		LEFT JOIN loyalty_stamp_program_cards lspc
+			ON lspc.program_id = lsp.id
+			AND lspc.stamp_count = csc.current_stamps
 		WHERE csc.tenant_id = $1
 		  AND csc.customer_id = $2
 		  AND lsp.is_active = TRUE
@@ -813,11 +817,20 @@ func (r *loyaltyStampsRetriever) Retrieve(ctx context.Context, db queries.DBTX, 
 
 	var parts []string
 	var rawVals [][]any
+	var attachments []SnippetAttachment
 	for rows.Next() {
-		var progName, rewardMode, rewardItemName string
+		var progName, rewardMode, rewardItemName, cardImageKey string
 		var current, required int32
-		if err := rows.Scan(&progName, &current, &required, &rewardMode, &rewardItemName); err != nil {
+		if err := rows.Scan(&progName, &current, &required, &rewardMode, &rewardItemName, &cardImageKey); err != nil {
 			return nil, err
+		}
+		// Pre-rendered card for this exact fill state (if rendered).
+		// The ai_reply worker sends it as a follow-up image.
+		if cardImageKey != "" {
+			attachments = append(attachments, SnippetAttachment{
+				Name:     progName,
+				ImageKey: cardImageKey,
+			})
 		}
 		// Reward label: single-mode reads the item name; bundle mode
 		// (or missing item) collapses to a generic "paket hadiah" so
@@ -843,8 +856,9 @@ func (r *loyaltyStampsRetriever) Retrieve(ctx context.Context, db queries.DBTX, 
 	}
 
 	s := Snippet{
-		Text:   fmt.Sprintf("Kartu stempel %s: %s", customerName, strings.Join(parts, "; ")),
-		Source: "loyalty_stamps",
+		Text:        fmt.Sprintf("Kartu stempel %s: %s", customerName, strings.Join(parts, "; ")),
+		Source:      "loyalty_stamps",
+		Attachments: attachments,
 	}
 	if verbose {
 		s.RawRows = rowsToMaps(

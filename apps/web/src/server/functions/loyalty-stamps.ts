@@ -18,6 +18,8 @@ import {
   uploadStampImage,
   getStampImageSignedUrl,
   deleteStampImage,
+  uploadStampCardAsset,
+  deleteStampCardPrefix,
   parseDataUrl,
 } from '@/lib/s3-storage'
 
@@ -73,6 +75,10 @@ export const listStampPrograms = createServerFn().handler(async () => {
       rewardItemId: loyaltyStampPrograms.rewardItemId,
       rewardItemName: inventoryItems.name,
       imageKey: loyaltyStampPrograms.imageKey,
+      cardDesignKey: loyaltyStampPrograms.cardDesignKey,
+      stampMarkKey: loyaltyStampPrograms.stampMarkKey,
+      cardLayout: loyaltyStampPrograms.cardLayout,
+      cardRenderStatus: loyaltyStampPrograms.cardRenderStatus,
       isActive: loyaltyStampPrograms.isActive,
       createdAt: loyaltyStampPrograms.createdAt,
     })
@@ -151,8 +157,12 @@ export const listStampPrograms = createServerFn().handler(async () => {
   // cost is small. Missing/expired keys silently degrade to null so
   // the UI just omits the thumbnail.
   const imageUrlByProgram = new Map<string, string>()
-  await Promise.all(
-    rows
+  // Card design + stamp mark presigned alongside the banner so the
+  // editor can rehydrate its preview in edit mode.
+  const cardDesignUrlByProgram = new Map<string, string>()
+  const stampMarkUrlByProgram = new Map<string, string>()
+  await Promise.all([
+    ...rows
       .filter((r) => !!r.imageKey)
       .map(async (r) => {
         try {
@@ -162,11 +172,33 @@ export const listStampPrograms = createServerFn().handler(async () => {
           // ignore — renderer omits the <img>
         }
       }),
-  )
+    ...rows
+      .filter((r) => !!r.cardDesignKey)
+      .map(async (r) => {
+        try {
+          const url = await getStampImageSignedUrl(r.cardDesignKey as string)
+          cardDesignUrlByProgram.set(r.id, url)
+        } catch {
+          // ignore
+        }
+      }),
+    ...rows
+      .filter((r) => !!r.stampMarkKey)
+      .map(async (r) => {
+        try {
+          const url = await getStampImageSignedUrl(r.stampMarkKey as string)
+          stampMarkUrlByProgram.set(r.id, url)
+        } catch {
+          // ignore
+        }
+      }),
+  ])
 
   return rows.map((r) => ({
     ...r,
     imageUrl: imageUrlByProgram.get(r.id) ?? null,
+    cardDesignUrl: cardDesignUrlByProgram.get(r.id) ?? null,
+    stampMarkUrl: stampMarkUrlByProgram.get(r.id) ?? null,
     scopeItems: scopeItemsByProgram.get(r.id) ?? [],
     bundleRewards: rewardItemsByProgram.get(r.id) ?? [],
   }))
@@ -209,6 +241,43 @@ export const getStampFormMasters = createServerFn().handler(async () => {
  * DB does not CHECK these (product_set + bundle straddle multiple
  * tables) so this validator is the source of truth for shape.
  */
+// Normalized grid the card editor emits; mirrors StampCardLayout in the
+// db schema. All coordinates/sizes are 0..1 fractions of the design.
+const cardLayoutSchema = z.object({
+  cols: z.number().int().min(1).max(20),
+  rows: z.number().int().min(1).max(20),
+  cells: z
+    .array(
+      z.object({
+        x: z.number().min(0).max(1),
+        y: z.number().min(0).max(1),
+      }),
+    )
+    .min(1)
+    .max(400),
+  markScale: z.number().min(0.01).max(1),
+  markOpacity: z.number().min(0.05).max(1),
+  // Editor-only grid rect for rehydration; renderer ignores it.
+  grid: z
+    .object({
+      x: z.number(),
+      y: z.number(),
+      w: z.number(),
+      h: z.number(),
+    })
+    .optional(),
+})
+
+// Digital stamp-card fields, shared by create + update. All optional —
+// a program without a card design just behaves as before.
+const cardFields = {
+  cardDesignDataUrl: z.string().startsWith('data:').optional().nullable(),
+  stampMarkDataUrl: z.string().startsWith('data:').optional().nullable(),
+  cardLayout: cardLayoutSchema.optional().nullable(),
+  /** Tear down the whole card (design + mark + rendered states). */
+  removeCard: z.boolean().optional(),
+}
+
 const programInput = z
   .object({
     name: z
@@ -247,6 +316,7 @@ const programInput = z
     imageDataUrl: z.string().startsWith('data:').optional().nullable(),
     /** Set true to clear the existing image without uploading a replacement. */
     removeImage: z.boolean().optional(),
+    ...cardFields,
   })
   .superRefine((v, ctx) => {
     if (v.scope === 'category' && !v.categoryId) {
@@ -427,6 +497,136 @@ async function applyImageSideEffect(
 }
 
 /**
+ * Best-effort trigger for the Go API's card pre-render. The endpoint
+ * flips the program to 'pending' and enqueues loyalty:render_card.
+ * Returns whether the trigger was accepted; the caller flips the row to
+ * 'failed' on a miss so the UI can prompt a retry. No-op (false) when
+ * the API URL / token aren't configured (local dev without the API).
+ */
+async function triggerStampCardRender(
+  tenantId: string,
+  programId: string,
+): Promise<boolean> {
+  const apiBase = process.env.API_URL
+  const token = process.env.INTERNAL_SERVICE_TOKEN
+  if (!apiBase || !token) return false
+  try {
+    const res = await fetch(`${apiBase}/v1/internal/loyalty/render-card`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ tenantId, programId }),
+      signal: AbortSignal.timeout(5000),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Card-design side-effects: upload the base design + stamp mark, persist
+ * the keys and grid layout, and kick off the pre-render. `removeCard`
+ * tears the whole thing down (design, mark, every rendered state). Runs
+ * AFTER the program row exists, like the banner side-effect — S3/render
+ * failures don't roll back the program; the merchant can re-save to
+ * retry. Render is only triggered once the card is complete (design +
+ * mark + layout all present).
+ */
+async function applyCardSideEffect(
+  tenantId: string,
+  programId: string,
+  data: {
+    cardDesignDataUrl?: string | null
+    stampMarkDataUrl?: string | null
+    cardLayout?: z.infer<typeof cardLayoutSchema> | null
+    removeCard?: boolean
+  },
+  current: {
+    cardDesignKey: string | null
+    stampMarkKey: string | null
+    cardLayout: z.infer<typeof cardLayoutSchema> | null
+  },
+): Promise<void> {
+  if (data.removeCard) {
+    await deleteStampCardPrefix(tenantId, programId)
+    await db
+      .update(loyaltyStampPrograms)
+      .set({
+        cardDesignKey: null,
+        stampMarkKey: null,
+        cardLayout: null,
+        cardRenderStatus: 'none',
+        cardRenderedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(loyaltyStampPrograms.id, programId))
+    return
+  }
+
+  const layoutProvided = data.cardLayout != null
+  if (
+    !data.cardDesignDataUrl &&
+    !data.stampMarkDataUrl &&
+    !layoutProvided
+  ) {
+    // Nothing card-related changed.
+    return
+  }
+
+  let designKey = current.cardDesignKey
+  let markKey = current.stampMarkKey
+  if (data.cardDesignDataUrl) {
+    const { bytes, mimeType } = parseDataUrl(data.cardDesignDataUrl)
+    designKey = (
+      await uploadStampCardAsset({
+        tenantId,
+        programId,
+        asset: 'design',
+        bytes,
+        mimeType,
+      })
+    ).key
+  }
+  if (data.stampMarkDataUrl) {
+    const { bytes, mimeType } = parseDataUrl(data.stampMarkDataUrl)
+    markKey = (
+      await uploadStampCardAsset({
+        tenantId,
+        programId,
+        asset: 'mark',
+        bytes,
+        mimeType,
+      })
+    ).key
+  }
+  const resolvedLayout = layoutProvided ? data.cardLayout! : current.cardLayout
+
+  await db
+    .update(loyaltyStampPrograms)
+    .set({
+      cardDesignKey: designKey,
+      stampMarkKey: markKey,
+      cardLayout: resolvedLayout,
+      updatedAt: new Date(),
+    })
+    .where(eq(loyaltyStampPrograms.id, programId))
+
+  // Render only when the card is complete.
+  if (designKey && markKey && resolvedLayout) {
+    const ok = await triggerStampCardRender(tenantId, programId)
+    if (!ok) {
+      await db
+        .update(loyaltyStampPrograms)
+        .set({ cardRenderStatus: 'failed' })
+        .where(eq(loyaltyStampPrograms.id, programId))
+    }
+  }
+}
+
+/**
  * Replaces both join tables for a program in a transaction. Used by
  * create + update so the caller never sees a half-written state.
  */
@@ -528,6 +728,11 @@ export const createStampProgram = createServerFn({ method: 'POST' })
     // participate; if the program row is in place we can safely upsert
     // the image and patch image_key after.
     await applyImageSideEffect(auth.tenantId, created.id, data, null)
+    await applyCardSideEffect(auth.tenantId, created.id, data, {
+      cardDesignKey: null,
+      stampMarkKey: null,
+      cardLayout: null,
+    })
     return created
   })
 
@@ -567,6 +772,7 @@ const updateProgramInput = z.object({
   imageDataUrl: z.string().startsWith('data:').optional().nullable(),
   removeImage: z.boolean().optional(),
   isActive: z.boolean(),
+  ...cardFields,
 })
 
 export const updateStampProgram = createServerFn({ method: 'POST' })
@@ -703,6 +909,11 @@ export const updateStampProgram = createServerFn({ method: 'POST' })
       data,
       program.imageKey,
     )
+    await applyCardSideEffect(auth.tenantId, data.id, data, {
+      cardDesignKey: program.cardDesignKey,
+      stampMarkKey: program.stampMarkKey,
+      cardLayout: program.cardLayout,
+    })
     return updated
   })
 
@@ -742,6 +953,7 @@ export const getCustomerStampCards = createServerFn({ method: 'POST' })
         rewardItemId: loyaltyStampPrograms.rewardItemId,
         rewardItemName: inventoryItems.name,
         imageKey: loyaltyStampPrograms.imageKey,
+        cardRenderStatus: loyaltyStampPrograms.cardRenderStatus,
         cardId: customerStampCards.id,
         currentStamps: customerStampCards.currentStamps,
         lifetimeStamps: customerStampCards.lifetimeStamps,
@@ -846,6 +1058,7 @@ export const getCustomerStampCards = createServerFn({ method: 'POST' })
         rewardItemId: r.rewardItemId,
         rewardItemName: r.rewardItemName,
         imageUrl: imageUrlByProgram.get(r.programId) ?? null,
+        cardRenderStatus: r.cardRenderStatus,
         bundleRewards: bundleByProgram.get(r.programId) ?? [],
         setItemIds: setItemsByProgram.get(r.programId) ?? [],
         currentStamps: current,
@@ -1138,4 +1351,51 @@ export const getStampActivity = createServerFn({ method: 'POST' })
       },
       topMembers,
     }
+  })
+
+/**
+ * Manual "Kirim kartu" from the dashboard. Forwards to the Go API's
+ * internal send-card endpoint, which picks the pre-rendered image for
+ * the customer's current stamp count and sends it from the tenant's
+ * connected WhatsApp instance. Surfaces the API's friendly Indonesian
+ * errors (no card rendered, no connected WhatsApp, etc.).
+ */
+export const sendStampCard = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      customerId: z.string().uuid(),
+      programId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const auth = await requirePOSAccess()
+    assertLoyaltyFeature(auth)
+    assertCanManage(auth)
+
+    const apiBase = process.env.API_URL
+    const token = process.env.INTERNAL_SERVICE_TOKEN
+    if (!apiBase || !token) {
+      throw new Error('Pengiriman kartu belum dikonfigurasi di server.')
+    }
+
+    const res = await fetch(`${apiBase}/v1/internal/loyalty/send-card`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        tenantId: auth.tenantId,
+        customerId: data.customerId,
+        programId: data.programId,
+      }),
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string
+      } | null
+      throw new Error(body?.error ?? 'Gagal mengirim kartu stempel.')
+    }
+    return { ok: true }
   })

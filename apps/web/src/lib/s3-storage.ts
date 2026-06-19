@@ -659,6 +659,80 @@ export async function deleteStampImage(key: string): Promise<void> {
   )
 }
 
+// ─── Digital stamp cards — base design + stamp mark ───────────────────
+// Both are permanent (tag `kind=loyalty-card`, no lifecycle rule). The
+// Go renderer reads these two objects and writes the per-state cards
+// under `<tenantId>/stamps/<programId>/card-<n>.png` (same prefix), so
+// deleting the whole prefix cleans design + mark + every rendered state.
+
+export const MAX_STAMP_CARD_BYTES = 4 * 1024 * 1024
+
+type StampCardAsset = 'design' | 'mark'
+
+function stampCardExt(mimeType: string): string {
+  return mimeType.includes('png')
+    ? 'png'
+    : mimeType.includes('webp')
+      ? 'webp'
+      : 'jpg'
+}
+
+/**
+ * Uploads one of the two card source assets. Path:
+ *   `<tenantId>/stamps/<programId>/<asset>.<ext>`
+ * Returns the key for `loyalty_stamp_programs.card_design_key` /
+ * `stamp_mark_key`. Idempotent per (program, asset, ext).
+ */
+export async function uploadStampCardAsset(params: {
+  tenantId: string
+  programId: string
+  asset: StampCardAsset
+  bytes: Buffer
+  mimeType: string
+}): Promise<{ key: string }> {
+  if (params.bytes.byteLength > MAX_STAMP_CARD_BYTES) {
+    throw new Error(
+      `Ukuran gambar kartu maksimal ${MAX_STAMP_CARD_BYTES / 1024 / 1024} MB.`,
+    )
+  }
+  const ext = stampCardExt(params.mimeType)
+  const key = `${params.tenantId}/stamps/${params.programId}/${params.asset}.${ext}`
+  await getClient().send(
+    new PutObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+      Body: params.bytes,
+      ContentType: params.mimeType,
+      CacheControl: 'private, max-age=31536000',
+      Tagging: 'kind=loyalty-card',
+    }),
+  )
+  return { key }
+}
+
+/**
+ * Deletes every object under a program's card prefix — design, mark,
+ * and all pre-rendered states. Best-effort: paginates ListObjectsV2 and
+ * deletes one object at a time (the prefix holds only a few dozen keys).
+ */
+export async function deleteStampCardPrefix(
+  tenantId: string,
+  programId: string,
+): Promise<void> {
+  const prefix = `${tenantId}/stamps/${programId}/`
+  const list = await getClient().send(
+    new ListObjectsV2Command({ Bucket: getBucket(), Prefix: prefix }),
+  )
+  for (const obj of list.Contents ?? []) {
+    if (!obj.Key) continue
+    await getClient()
+      .send(new DeleteObjectCommand({ Bucket: getBucket(), Key: obj.Key }))
+      .catch(() => {
+        // Orphaned object is harmless — never block the user.
+      })
+  }
+}
+
 // ─── Konten Promosi — AI image generation ────────────────────────────
 // Each generation stores up to two objects under `<tenantId>/konten/`:
 //   - `<imageId>-src.<ext>` — the product photo the tenant uploaded

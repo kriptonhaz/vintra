@@ -26,6 +26,7 @@ import {
   HandCoins,
   Stamp,
   Settings2,
+  Send,
 } from 'lucide-react'
 import {
   getCustomer,
@@ -36,7 +37,10 @@ import {
   getCustomerLoyaltySummary,
   getPOSSettings,
 } from '@/server/functions/pos'
-import { getCustomerStampCards } from '@/server/functions/loyalty-stamps'
+import {
+  getCustomerStampCards,
+  sendStampCard,
+} from '@/server/functions/loyalty-stamps'
 import { getCustomerKasbon } from '@/server/functions/cashflow-ar'
 import { posTierLimits } from '@vintra/shared'
 import { Button } from '@/components/ui/button'
@@ -101,6 +105,21 @@ function CustomerDetailPage() {
     queryKey: ['pos', 'kasbon-summary', customer.id],
     queryFn: () => getCustomerKasbon({ data: { customerId: customer.id } }),
     staleTime: 30 * 1000,
+  })
+
+  // Manual stamp-card send over WhatsApp. Tracks the in-flight program
+  // via mutation variables so only that row shows a pending state.
+  const sendCardMut = useMutation({
+    mutationFn: (programId: string) =>
+      sendStampCard({ data: { customerId: customer.id, programId } }),
+    onSuccess: () =>
+      toast({ title: 'Kartu stempel dikirim', variant: 'success' }),
+    onError: (err) =>
+      toast({
+        title: 'Gagal mengirim kartu',
+        description: err instanceof Error ? err.message : 'Coba lagi.',
+        variant: 'error',
+      }),
   })
 
   const editMut = useMutation({
@@ -364,6 +383,24 @@ function CustomerDetailPage() {
                         <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
                           {c.currentStamps}/{c.stampsRequired}
                         </span>
+                      )}
+                      {c.cardRenderStatus === 'ready' && (
+                        <button
+                          type="button"
+                          onClick={() => sendCardMut.mutate(c.programId)}
+                          disabled={
+                            sendCardMut.isPending &&
+                            sendCardMut.variables === c.programId
+                          }
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-brand-600 hover:bg-brand-50 disabled:opacity-50 dark:hover:bg-brand-900/20"
+                          aria-label={`Kirim kartu stempel ${c.programName}`}
+                        >
+                          <Send className="h-3 w-3" />
+                          {sendCardMut.isPending &&
+                          sendCardMut.variables === c.programId
+                            ? 'Mengirim…'
+                            : 'Kirim kartu'}
+                        </button>
                       )}
                       <button
                         type="button"
