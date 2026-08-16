@@ -68,7 +68,7 @@ function SiteLockedPage() {
             dibagikan ke customer, dipasang di paket WhatsApp, atau jadi link IG bio.
           </p>
           <a
-            href="/pricing"
+            href="/#harga"
             className="mt-6 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-brand-700 shadow-lg transition hover:scale-105"
           >
             Lihat Paket Komplit

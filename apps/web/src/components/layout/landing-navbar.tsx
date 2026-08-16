@@ -19,10 +19,11 @@ interface LandingNavbarProps {
   tone?: 'light' | 'dark'
 }
 
-// JUR-13: default nav links for public pages. Pricing already lives
-// at /pricing. Caller can override by passing `navLinks` prop.
+// JUR-13: default nav links for public pages. The standalone /pricing
+// page is hidden for now — pricing lives in the landing #harga section.
+// Caller can override by passing `navLinks` prop.
 const DEFAULT_NAV_LINKS: NavLink[] = [
-  { label: 'Harga', href: '/pricing' },
+  { label: 'Harga', href: '/#harga' },
   { label: 'Bantuan', href: '/help' },
   { label: 'Kontak', href: '/contact' },
 ]

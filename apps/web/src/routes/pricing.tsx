@@ -11,7 +11,7 @@
  *  6. FAQ accordion
  *  7. CTA banner
  */
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, Link, notFound } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import {
@@ -40,6 +40,11 @@ import { SALES_WHATSAPP_PHONE, buildSalesWaUrl } from '@/lib/constants' // JUR-1
 import i18n from '@/lib/i18n' // JUR-138
 
 export const Route = createFileRoute('/pricing')({
+  // Temporarily hidden — pricing now lives in the landing #harga section.
+  // Throwing notFound() makes /pricing render the 404 page.
+  loader: () => {
+    throw notFound()
+  },
   head: () => ({
     meta: [
       { title: i18n.t('pricingPage.metaTitle') },

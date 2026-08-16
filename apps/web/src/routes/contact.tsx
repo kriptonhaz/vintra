@@ -207,7 +207,8 @@ function ContactPage() {
                 {t('contact.success.ctaHome')}
               </Link>
               <Link
-                to="/pricing"
+                to="/"
+                hash="harga"
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
               >
                 {t('contact.success.ctaPricing')} <ArrowRight className="h-4 w-4" />

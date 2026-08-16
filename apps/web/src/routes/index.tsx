@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { createBrowserSupabase } from "@/lib/supabase";
 import { captureRefFromUrl } from "@/lib/referral-cookie";
 import { CheckCircle2 } from "lucide-react";
@@ -45,7 +45,6 @@ const PublicQueueNotFound = lazy(() =>
 import { PublicSiteError } from "@/components/public-site-error";
 import { getIndexRouteHostData } from "@/server/functions/public-tenant";
 import { buildPublicSiteHead } from "@/lib/public-site-seo";
-import { POS_PLANS } from "@vintra/shared";
 import { SALES_WHATSAPP_PHONE, buildSalesWaUrl } from "@/lib/constants";
 
 const WA_PRESET_MESSAGE = "Halo, saya ingin bertanya seputar Vintra";
@@ -754,105 +753,11 @@ function TestimonialsSection() {
 
 // ─── Pricing (ink) ──────────────────────────────────────────────────────────
 
-function formatIdr(amount: number) {
-  return new Intl.NumberFormat("id-ID").format(amount);
-}
-
-interface PlanCardProps {
-  name: string;
-  tagline: string;
-  price: string;
-  priceUnit: string;
-  secondary?: string;
-  cta: string;
-  href: string;
-  featured?: boolean;
-  featuredBadge?: string;
-}
-
-function PlanCard({
-  name,
-  tagline,
-  price,
-  priceUnit,
-  secondary,
-  cta,
-  href,
-  featured,
-  featuredBadge,
-}: PlanCardProps) {
-  return (
-    <a
-      href={href}
-      className={cn(
-        "relative flex flex-col rounded-3xl p-7 transition-all duration-300 hover:-translate-y-1",
-        featured
-          ? "bg-white shadow-2xl shadow-brand-600/30 lg:scale-105"
-          : "border border-white/10 bg-white/[0.07] hover:bg-white/[0.1]",
-      )}
-    >
-      {featured && featuredBadge && (
-        <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-gradient-to-r from-accent-400 to-accent-600 px-3.5 py-1 text-[10px] font-bold tracking-wider text-gray-950 uppercase shadow-md">
-          {featuredBadge}
-        </span>
-      )}
-      <h3
-        className={cn(
-          "text-base font-bold",
-          featured ? "text-gray-950" : "text-white",
-        )}
-      >
-        {name}
-      </h3>
-      <p
-        className={cn(
-          "mt-0.5 text-xs",
-          featured ? "text-gray-500" : "text-gray-400",
-        )}
-      >
-        {tagline}
-      </p>
-      <div className="mt-5 flex-1">
-        <p className="flex items-baseline">
-          <span
-            className={cn(
-              "text-3xl font-extrabold tracking-tight",
-              featured ? "text-gray-950" : "text-white",
-            )}
-          >
-            {price}
-          </span>
-          <span
-            className={cn(
-              "ml-1 text-xs",
-              featured ? "text-gray-500" : "text-gray-400",
-            )}
-          >
-            {priceUnit}
-          </span>
-        </p>
-        {secondary && <p className="mt-1 text-[11px] text-gray-500">{secondary}</p>}
-      </div>
-      <div
-        className={cn(
-          "mt-6 inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors",
-          featured
-            ? "bg-brand-600 text-white shadow-lg shadow-brand-600/30"
-            : "border border-white/15 bg-white/5 text-white",
-        )}
-      >
-        {cta} <ArrowRight className="h-3 w-3" />
-      </div>
-    </a>
-  );
-}
-
 function PricingSection() {
   const { t } = useTranslation();
-  const komplitAnnual = POS_PLANS.find((p) => p.key === "pos_komplit_annual")!;
-  const komplitMonthly = POS_PLANS.find(
-    (p) => p.key === "pos_komplit_monthly",
-  )!;
+  const highlights = t("landing.pricing.highlights", {
+    returnObjects: true,
+  }) as string[];
 
   return (
     <section
@@ -876,60 +781,55 @@ function PricingSection() {
           </div>
         </Reveal>
 
-        <div className="mx-auto grid max-w-5xl gap-5 sm:grid-cols-3 sm:items-stretch">
-          <PlanCard
-            name={t("landing.pricing.freeName")}
-            tagline={t("landing.pricing.freeTagline")}
-            price="Rp 0"
-            priceUnit={t("landing.pricing.freePriceUnit")}
-            cta={t("landing.pricing.freeCta")}
-            href="/pricing"
-          />
-          <PlanCard
-            name={t("landing.pricing.annualName")}
-            tagline={t("landing.pricing.annualTagline")}
-            price={`Rp ${formatIdr(komplitAnnual.pricePerMonth)}`}
-            priceUnit={t("landing.pricing.annualPriceUnit")}
-            secondary={t("landing.pricing.annualSecondaryTpl", {
-              total: formatIdr(komplitAnnual.pricePerMonth * 12),
-            })}
-            cta={t("landing.pricing.lookCta")}
-            href="/pricing"
-            featured
-            featuredBadge={t("landing.pricing.popularBadge")}
-          />
-          <PlanCard
-            name={t("landing.pricing.monthlyName")}
-            tagline={t("landing.pricing.monthlyTagline")}
-            price={`Rp ${formatIdr(komplitMonthly.pricePerMonth)}`}
-            priceUnit={t("landing.pricing.monthlyPriceUnit")}
-            cta={t("landing.pricing.lookCta")}
-            href="/pricing"
-          />
-        </div>
+        <Reveal>
+          <div className="mx-auto max-w-md">
+            <div className="relative flex flex-col rounded-3xl bg-white p-8 shadow-2xl shadow-brand-600/30">
+              <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-gradient-to-r from-accent-400 to-accent-600 px-3.5 py-1 text-[10px] font-bold tracking-wider text-gray-950 uppercase shadow-md">
+                {t("landing.pricing.popularBadge")}
+              </span>
 
-        <div className="mt-12 text-center">
-          <a
-            href="/pricing"
-            className="group inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.08] px-6 py-3 text-sm font-bold text-white transition-colors hover:bg-white/[0.12]"
-          >
-            {t("landing.pricing.mainCta")}
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-          </a>
-          <p className="mt-4 text-xs text-gray-500">
-            <Trans
-              i18nKey="landing.pricing.footnote"
-              components={{
-                waLink: (
-                  <a
-                    href="/pricing#whatsapp"
-                    className="font-medium text-brand-300 hover:underline"
-                  />
-                ),
-              }}
-            />
-          </p>
-        </div>
+              <h3 className="text-lg font-bold text-gray-950">
+                {t("landing.pricing.packageName")}
+              </h3>
+              <p className="mt-0.5 text-sm text-gray-500">
+                {t("landing.pricing.packageTagline")}
+              </p>
+
+              <div className="mt-6 flex items-baseline">
+                <span className="text-4xl font-extrabold tracking-tight text-gray-950">
+                  {t("landing.pricing.price")}
+                </span>
+                <span className="ml-1.5 text-sm text-gray-500">
+                  {t("landing.pricing.priceUnit")}
+                </span>
+              </div>
+
+              <ul className="mt-7 space-y-3 border-t border-gray-100 pt-7">
+                {highlights.map((h) => (
+                  <li
+                    key={h}
+                    className="flex items-start gap-2.5 text-sm text-gray-700"
+                  >
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
+                    {h}
+                  </li>
+                ))}
+              </ul>
+
+              <a
+                href="/auth/register"
+                className="mt-8 inline-flex items-center justify-center gap-1.5 rounded-xl bg-brand-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-brand-600/30 transition-colors hover:bg-brand-700"
+              >
+                {t("landing.pricing.cta")}
+                <ArrowRight className="h-4 w-4" />
+              </a>
+
+              <p className="mt-4 text-center text-xs text-gray-500">
+                {t("landing.pricing.footnote")}
+              </p>
+            </div>
+          </div>
+        </Reveal>
       </div>
     </section>
   );
