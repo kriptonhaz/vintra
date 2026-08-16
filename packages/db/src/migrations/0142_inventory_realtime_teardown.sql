@@ -13,7 +13,6 @@
 -- none of this is needed. Teardown order matters: the policies reference
 -- `auth_tenant_ids()`, so they must go first.
 
---> statement-breakpoint
 -- 1. Leave the realtime publication. Guarded because a database that never
 --    ran 0137 (or had it partially applied) would otherwise error here.
 DO $$
