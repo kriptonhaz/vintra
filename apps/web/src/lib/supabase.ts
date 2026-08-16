@@ -39,9 +39,25 @@ import { createClient } from '@supabase/supabase-js'
  *
  * `detectSessionInUrl: true` keeps the OAuth ?code= callback flow
  * working at /auth/callback (same behaviour @supabase/ssr provided).
+ *
+ * SINGLETON (do NOT remove): every caller shares ONE GoTrueClient per
+ * browser context. PKCE auth codes are single-use, and `detectSessionInUrl`
+ * triggers the code exchange the moment a client initializes. When two
+ * clients existed at once (the global one in `useAuthProvider` plus the
+ * per-route one in `/auth/callback`), both spotted the same `?code=` on
+ * page load and fired `exchangeCodeForSession` concurrently — GoTrue
+ * rejected the racing requests as "Possible abuse attempt" (HTTP 400),
+ * SIGNED_IN never fired, and the callback's timeout showed
+ * "Gagal masuk dengan Google" on the first try (it only "worked" on a
+ * retry when the timing happened to line up). A single shared instance
+ * exchanges the code exactly once. This also silences supabase-js's
+ * "Multiple GoTrueClient instances detected" warning.
  */
+let browserClient: ReturnType<typeof createClient> | null = null
+
 export function createBrowserSupabase() {
-  return createClient(
+  if (browserClient) return browserClient
+  browserClient = createClient(
     import.meta.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL!,
     import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY!,
     {
@@ -53,6 +69,7 @@ export function createBrowserSupabase() {
       },
     },
   )
+  return browserClient
 }
 
 export function createServerSupabase() {
