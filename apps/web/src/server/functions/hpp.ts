@@ -39,6 +39,7 @@ import { z } from 'zod'
 import {
   calculateMaterialCost,
   calculateMargin,
+  perUnitHpp,
 } from '@/lib/hpp-calculator'
 
 // ─── Tenant Categories ───────────────────────────────
@@ -902,8 +903,11 @@ export const setProductHpp = createServerFn({ method: 'POST' })
 
     if (!product) throw new Error('Produk tidak ditemukan')
 
+    // `data.hpp` is the batch cost; margin is per-unit economics, so
+    // divide by productionQty before comparing to the per-unit price.
     const sellingPrice = Number(product.sellingPrice)
-    const margin = sellingPrice > 0 ? ((sellingPrice - data.hpp) / sellingPrice) * 100 : 0
+    const unitHpp = perUnitHpp(data.hpp, Number(product.productionQty))
+    const margin = sellingPrice > 0 ? ((sellingPrice - unitHpp) / sellingPrice) * 100 : 0
 
     await db
       .update(products)
@@ -954,9 +958,15 @@ export const calculateProductHpp = createServerFn()
       return sum + calculateMaterialCost(Number(item.pricePerUnit), Number(item.quantity))
     }, 0)
 
+    // `hpp` is the total cost for one batch (productionQty units).
+    // Margin is per-unit: compare the per-unit cost to the per-unit
+    // selling price, otherwise a multi-yield recipe reads as a loss.
     const hpp = totalMaterialCost
     const sellingPrice = Number(product.sellingPrice)
-    const margin = calculateMargin(sellingPrice, hpp)
+    const margin = calculateMargin(
+      sellingPrice,
+      perUnitHpp(hpp, Number(product.productionQty)),
+    )
 
     // Update product with calculated HPP and margin
     await db

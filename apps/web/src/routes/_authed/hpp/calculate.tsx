@@ -26,6 +26,7 @@ import {
 } from '@/lib/invalidate'
 import { cn, formatDate, formatNumberID } from '@/lib/utils' // JUR-137
 import { formatRupiah, formatRupiahDecimal } from '@/lib/currency'
+import { perUnitHpp } from '@/lib/hpp-calculator'
 import {
   findOrCreateSupplier,
   createMaterial,
@@ -1763,21 +1764,34 @@ function StepHargaJual({
     control: form.control,
     name: 'sellingPrice',
   })
+  const productionQty = useWatch({
+    control: form.control,
+    name: 'productionQty',
+  })
   const competitors = useWatch({
     control: form.control,
     name: 'competitors',
   })
 
+  // `totalCost` is the cost to produce one full batch (productionQty
+  // units). The selling price is per unit, so all profit/margin math
+  // must use the per-unit cost — otherwise a recipe that yields many
+  // units reads as a heavy loss (e.g. 42 cookies for Rp 13.308 vs a
+  // Rp 5.000 unit price).
   const totalCost = useMemo(
     () => (costItems || []).reduce((sum, item) => sum + getSubtotal(item), 0),
     [costItems],
   )
+  const unitCost = useMemo(
+    () => perUnitHpp(totalCost, parseFloat(productionQty) || 0),
+    [totalCost, productionQty],
+  )
 
   const suggestedPrice = useMemo(() => {
     const m = parseFloat(targetMargin) || 0
-    if (m >= 100 || m <= 0 || totalCost === 0) return 0
-    return totalCost / (1 - m / 100)
-  }, [totalCost, targetMargin])
+    if (m >= 100 || m <= 0 || unitCost === 0) return 0
+    return unitCost / (1 - m / 100)
+  }, [unitCost, targetMargin])
 
   // Auto-fill selling price from suggested when empty
   useEffect(() => {
@@ -1791,7 +1805,7 @@ function StepHargaJual({
 
   const margin = parseFloat(targetMargin) || 0
   const finalPrice = parseFloat(sellingPrice) || 0
-  const profit = finalPrice > 0 && totalCost > 0 ? finalPrice - totalCost : 0
+  const profit = finalPrice > 0 && unitCost > 0 ? finalPrice - unitCost : 0
   const actualMarginPercent =
     finalPrice > 0 ? (profit / finalPrice) * 100 : 0
   const gaugePercent =
@@ -1827,7 +1841,7 @@ function StepHargaJual({
                   </p>
                 </div>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  {formatRupiah(totalCost)}
+                  {formatRupiah(unitCost)}
                 </p>
               </div>
 
@@ -2104,7 +2118,7 @@ function StepHargaJual({
                     <div className="flex items-center justify-between">
                       <dt className="text-gray-600 dark:text-gray-400">{t('calc.step3.summaryHpp')}</dt>
                       <dd className="font-medium text-gray-900 dark:text-gray-100">
-                        {formatRupiah(totalCost)}
+                        {formatRupiah(unitCost)}
                       </dd>
                     </div>
                     <div className="flex items-center justify-between">
@@ -2214,8 +2228,12 @@ function StepRingkasan({
     () => costItems.reduce((sum, item) => sum + getSubtotal(item), 0),
     [costItems],
   )
+  // Profit is per unit: the selling price is per unit, so compare it
+  // against the per-unit cost (batch cost ÷ production output), not the
+  // full batch cost.
+  const unitCost = perUnitHpp(totalCost, parseFloat(values.productionQty) || 0)
   const finalPrice = parseFloat(values.sellingPrice) || 0
-  const profit = finalPrice > 0 && totalCost > 0 ? finalPrice - totalCost : 0
+  const profit = finalPrice > 0 && unitCost > 0 ? finalPrice - unitCost : 0
   const margin = parseFloat(values.targetMargin) || 0
 
   const categoryDisplay = values.category || '—'

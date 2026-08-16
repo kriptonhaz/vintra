@@ -9,13 +9,18 @@ import {
 } from '@/components/ui/table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { formatRupiah } from '@/lib/currency'
+import { perUnitHpp } from '@/lib/hpp-calculator'
 import { MarginBadge } from './margin-badge'
 
 interface ReportProduct {
   id: string
   name: string
   sellingPrice: number
+  // Total cost to produce one batch (productionQty units). Profit and
+  // margin are per-unit, so this is divided by productionQty before
+  // being compared to the per-unit selling price.
   hpp: number | null
+  productionQty: number | null
   margin: number | null
   category: string | null
 }
@@ -36,10 +41,15 @@ export function HppReportTable({ products, totalOverhead }: HppReportTableProps)
     )
   }
 
-  // Calculate summary statistics
+  // Calculate summary statistics. The table reports per-unit economics
+  // ("one of each"), so HPP totals sum the per-unit cost — not the
+  // batch cost — to stay consistent with the per-unit selling price.
   const productsWithHpp = products.filter((p) => p.hpp !== null)
   const totalSellingPrice = products.reduce((sum, p) => sum + p.sellingPrice, 0)
-  const totalHpp = productsWithHpp.reduce((sum, p) => sum + (p.hpp ?? 0), 0)
+  const totalHpp = productsWithHpp.reduce(
+    (sum, p) => sum + perUnitHpp(p.hpp ?? 0, Number(p.productionQty)),
+    0,
+  )
   const averageMargin =
     productsWithHpp.length > 0
       ? productsWithHpp.reduce((sum, p) => sum + (p.margin ?? 0), 0) /
@@ -80,7 +90,7 @@ export function HppReportTable({ products, totalOverhead }: HppReportTableProps)
           <TableRow>
             <TableHead>Produk</TableHead>
             <TableHead>Kategori</TableHead>
-            <TableHead>HPP</TableHead>
+            <TableHead>HPP/Unit</TableHead>
             <TableHead>Harga Jual</TableHead>
             <TableHead>Laba/Unit</TableHead>
             <TableHead>Margin</TableHead>
@@ -89,10 +99,12 @@ export function HppReportTable({ products, totalOverhead }: HppReportTableProps)
         </TableHeader>
         <TableBody>
           {products.map((product) => {
-            const profit =
+            const unitHpp =
               product.hpp !== null
-                ? product.sellingPrice - product.hpp
+                ? perUnitHpp(product.hpp, Number(product.productionQty))
                 : null
+            const profit =
+              unitHpp !== null ? product.sellingPrice - unitHpp : null
 
             return (
               <TableRow key={product.id}>
@@ -101,7 +113,7 @@ export function HppReportTable({ products, totalOverhead }: HppReportTableProps)
                   {product.category ?? '-'}
                 </TableCell>
                 <TableCell>
-                  {product.hpp !== null ? formatRupiah(product.hpp) : '-'}
+                  {unitHpp !== null ? formatRupiah(unitHpp) : '-'}
                 </TableCell>
                 <TableCell>{formatRupiah(product.sellingPrice)}</TableCell>
                 <TableCell>

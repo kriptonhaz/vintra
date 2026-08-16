@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { getHppReport, deleteProduct, getHppPhotoUrls } from '@/server/functions/hpp'
 import { invalidateTenantProducts } from '@/lib/invalidate'
 import { formatRupiah } from '@/lib/currency'
+import { perUnitHpp } from '@/lib/hpp-calculator'
 import { formatDate } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { MarginBadge } from '@/components/modules/hpp/margin-badge'
@@ -331,7 +332,11 @@ function HppIndexPage() {
                         {formatDate(product.updatedAt)}
                       </TableCell>
                       <TableCell>
-                        {product.hpp !== null ? formatRupiah(product.hpp) : '-'}
+                        {product.hpp !== null
+                          ? formatRupiah(
+                              perUnitHpp(product.hpp, Number(product.productionQty)),
+                            )
+                          : '-'}
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">{formatRupiah(product.sellingPrice)}</TableCell>
                       <TableCell className="hidden sm:table-cell">

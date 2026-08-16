@@ -22,6 +22,17 @@ export function calculateMaterialCost(pricePerUnit: number, quantity: number): n
   return pricePerUnit * quantity
 }
 
+/**
+ * Per-unit cost basis. The stored `hpp` is the cost to produce one
+ * batch (productionQty units); margin/profit must always be computed
+ * against the per-unit cost because the selling price is per unit.
+ * Falls back to the batch cost when productionQty is missing/invalid.
+ */
+export function perUnitHpp(batchHpp: number, productionQty: number): number {
+  const qty = productionQty > 0 ? productionQty : 1
+  return batchHpp / qty
+}
+
 export function calculateMargin(sellingPrice: number, hpp: number): number {
   if (sellingPrice === 0) return 0
   return ((sellingPrice - hpp) / sellingPrice) * 100

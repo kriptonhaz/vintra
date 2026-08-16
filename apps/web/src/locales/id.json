@@ -382,8 +382,8 @@
     },
     "step3": {
       "title": "Penentuan Harga Jual",
-      "hppLabel": "Total Harga Pokok Produksi (HPP)",
-      "hppSubLabel": "Modal dasar per unit produk",
+      "hppLabel": "HPP per Unit",
+      "hppSubLabel": "Modal dasar per unit produk (total biaya ÷ jumlah produksi)",
       "targetMarginLabel": "Target Profit Margin (%)",
       "targetMarginHint": "Persentase keuntungan yang diinginkan dari HPP.",
       "suggestedPriceLabel": "Saran Harga Jual",
@@ -606,6 +606,7 @@
     "notes": "Catatan",
     "financialSummary": "Ringkasan Finansial",
     "totalHpp": "Total HPP",
+    "hppPerUnit": "HPP / Unit",
     "sellingPrice": "Harga Jual",
     "profit": "Profit / Unit",
     "margin": "Margin",

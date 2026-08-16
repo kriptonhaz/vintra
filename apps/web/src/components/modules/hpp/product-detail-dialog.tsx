@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { MarginBadge } from '@/components/modules/hpp/margin-badge'
 import { formatRupiah, formatRupiahDecimal } from '@/lib/currency'
+import { perUnitHpp } from '@/lib/hpp-calculator'
 import { formatDate } from '@/lib/utils'
 import { getProductForEdit, duplicateProduct } from '@/server/functions/hpp'
 import {
@@ -81,7 +82,11 @@ export function ProductDetailDialog({
   const product = data?.product
   const materials = data?.materials ?? []
   const totalHpp = product?.hpp ?? 0
-  const profit = product ? product.sellingPrice - totalHpp : 0
+  // `hpp` is the batch cost; profit/selling price are per unit, so the
+  // financial summary compares the per-unit cost (batch ÷ production
+  // output) against the per-unit selling price.
+  const unitHpp = product ? perUnitHpp(totalHpp, Number(product.productionQty)) : 0
+  const profit = product ? product.sellingPrice - unitHpp : 0
 
   return (
     <Dialog open={!!productId} onClose={onClose} className="max-w-2xl">
@@ -160,8 +165,8 @@ export function ProductDetailDialog({
               </h3>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <FinancialCard
-                  label={t('hppDetail.totalHpp')}
-                  value={totalHpp ? formatRupiah(totalHpp) : '-'}
+                  label={t('hppDetail.hppPerUnit')}
+                  value={totalHpp ? formatRupiah(unitHpp) : '-'}
                 />
                 <FinancialCard
                   label={t('hppDetail.sellingPrice')}

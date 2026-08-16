@@ -382,8 +382,8 @@
     },
     "step3": {
       "title": "Set Selling Price",
-      "hppLabel": "Total Cost of Goods Sold (HPP)",
-      "hppSubLabel": "Base cost per product unit",
+      "hppLabel": "HPP per Unit",
+      "hppSubLabel": "Base cost per product unit (total cost ÷ production output)",
       "targetMarginLabel": "Target Profit Margin (%)",
       "targetMarginHint": "Desired profit percentage from HPP.",
       "suggestedPriceLabel": "Suggested Selling Price",
@@ -606,6 +606,7 @@
     "notes": "Notes",
     "financialSummary": "Financial Summary",
     "totalHpp": "Total HPP",
+    "hppPerUnit": "HPP / Unit",
     "sellingPrice": "Selling Price",
     "profit": "Profit / Unit",
     "margin": "Margin",
