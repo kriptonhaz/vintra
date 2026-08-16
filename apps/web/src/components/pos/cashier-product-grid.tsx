@@ -24,6 +24,8 @@ export interface POSProduct {
   baseUnitId: string
   baseUnitLabel: string
   photoKey: string | null
+  /** Short-lived signed GET URL for the photo (server-signed in listPOSProducts). */
+  photoUrl?: string | null
   categoryId: string | null
   /** Stock at this branch, expressed in BASE units. */
   stockInBase: number
@@ -319,8 +321,17 @@ function ProductCard({
           'disabled:cursor-not-allowed disabled:opacity-60',
         )}
       >
-        <div className="relative mb-2 flex h-16 items-center justify-center rounded-md bg-gradient-to-br from-brand-50 to-brand-100 text-2xl font-bold text-brand-600 dark:from-brand-900/30 dark:to-brand-900/10">
-          {product.name.charAt(0).toUpperCase()}
+        <div className="relative mb-2 flex aspect-[2/1.5] w-full items-center justify-center overflow-hidden rounded-md bg-gradient-to-br from-brand-50 to-brand-100 text-2xl font-bold text-brand-600 dark:from-brand-900/30 dark:to-brand-900/10">
+          {product.photoUrl ? (
+            <img
+              src={product.photoUrl}
+              alt={product.name}
+              loading="lazy"
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            product.name.charAt(0).toUpperCase()
+          )}
           {product.isFavorite && (
             <span
               title="Produk favorit — selalu di atas saat kategori Semua"
