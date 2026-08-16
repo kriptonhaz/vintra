@@ -2350,8 +2350,13 @@ export const bulkRecordStockOpname = createServerFn({ method: 'POST' })
             itemId: z.string().uuid(),
             actualQty: z.coerce.number().min(0),
             // System stock shown on the count sheet — the baseline the
-            // physical count was compared against.
-            systemStock: z.coerce.number().min(0),
+            // physical count was compared against. NOT user input: it's a
+            // read of the current balance, which can legitimately be
+            // negative after an oversell. Opname is the tool that
+            // reconciles those back to reality, so a negative baseline
+            // must not be rejected here — doing so failed the whole
+            // submission because of one bad row.
+            systemStock: z.coerce.number(),
             note: z.string().max(500).optional().nullable(),
           }),
         )
@@ -3124,5 +3129,44 @@ export const listInventoryFormMasters = createServerFn().handler(async () => {
     suppliers: supplierList,
     hppMaterials,
     hppProducts,
+  }
+})
+
+// ─── Stock freshness watermark ───────────────────────────────────────
+
+/**
+ * Cheapest possible "has stock changed?" probe for this tenant, polled by
+ * `useInventorySync` to decide when to refetch.
+ *
+ * Returns a single opaque string built from the newest movement timestamp
+ * and the newest balance timestamp. The client never interprets the parts —
+ * it only compares the string against the previous one, so the format is
+ * free to change.
+ *
+ * Both aggregates are covered by the tenant-scoped indexes already on these
+ * tables, and the response is ~50 bytes, which is the entire point: this
+ * replaced a Supabase Realtime socket that streamed every
+ * `inventory_movements` row (written on every POS sale via BOM deduction)
+ * to every signed-in tab.
+ */
+export const getStockWatermark = createServerFn().handler(async () => {
+  const { tenantId } = await requireAuth()
+
+  const [movementRow] = await db
+    .select({
+      lastMovement: sql<string | null>`max(${inventoryMovements.createdAt})`,
+    })
+    .from(inventoryMovements)
+    .where(eq(inventoryMovements.tenantId, tenantId))
+
+  const [balanceRow] = await db
+    .select({
+      lastBalance: sql<string | null>`max(${inventoryStockBalances.updatedAt})`,
+    })
+    .from(inventoryStockBalances)
+    .where(eq(inventoryStockBalances.tenantId, tenantId))
+
+  return {
+    version: `${movementRow?.lastMovement ?? '0'}|${balanceRow?.lastBalance ?? '0'}`,
   }
 })
