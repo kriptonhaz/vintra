@@ -17,6 +17,7 @@ import {
   createInventoryItem,
   listInventoryFormMasters,
   uploadInventoryItemPhotoFn,
+  copyHppPhotoToInventoryItemFn,
   getInventoryPhotoUrls,
   previewLinkedItemsForMaterial,
   applyHppPriceToInventory,
@@ -728,28 +729,22 @@ function CreateItemForm({
     if (hppCost > 0 && !form.getValues('costPrice')) {
       form.setValue('costPrice', hppCost, { shouldValidate: true })
     }
-    // Foto — pull the product's photo into the form's pending upload
-    // buffer so the existing two-step upload writes a fresh S3 key
-    // for this inventory item (independent lifecycle from the HPP
-    // product's photo, so deleting one doesn't orphan the other).
-    // Skip when the user already has a photo so a manual upload is
-    // never silently overwritten.
+    // Foto — show the HPP product's photo as a preview (signed URL via
+    // <img>, which doesn't need bucket CORS). The actual S3 copy happens
+    // server-side on save (copyHppPhotoToInventoryItemFn) so the new
+    // inventory item gets its own key with an independent lifecycle. We
+    // intentionally DON'T fetch the bytes into a data URL here — a
+    // browser fetch of the presigned URL would require CORS and was
+    // silently failing. Skip when the user already picked a photo.
     const photoKey = product.photoKey
-    if (photoKey && !photoDataUrl) {
+    if (photoKey && !photoDataUrl && !inheritedPhotoUrl) {
       void (async () => {
         try {
           const urls = await getHppPhotoUrls({ data: { keys: [photoKey] } })
           const url = urls[photoKey]
           if (!url) return
-          const resp = await fetch(url)
-          if (!resp.ok) return
-          const blob = await resp.blob()
-          const reader = new FileReader()
-          reader.onloadend = () => {
-            const result = reader.result
-            if (typeof result === 'string') setPhotoDataUrl(result)
-          }
-          reader.readAsDataURL(blob)
+          setInheritedPhotoUrl(url)
+          setInheritedFromProductId(linkedHppProductId)
         } catch {
           // Soft-fail — photo prefill is a nice-to-have, never blocks the form.
         }
@@ -774,6 +769,15 @@ function CreateItemForm({
   // we still close the sheet — the user can re-add the photo from the
   // detail page rather than losing their entire form input.
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null)
+  // "Jual di POS" photo inheritance: when the form is linked to an HPP
+  // product, we preview that product's photo via its signed URL and
+  // copy it server-side on save (no browser CORS). `inheritedPhotoUrl`
+  // is the preview; `inheritedFromProductId` tells onSubmit to run the
+  // copy. Both are cleared the moment the user picks their own photo.
+  const [inheritedPhotoUrl, setInheritedPhotoUrl] = useState<string | null>(null)
+  const [inheritedFromProductId, setInheritedFromProductId] = useState<
+    string | null
+  >(null)
 
   async function onSubmit(values: ItemForm) {
     try {
@@ -800,11 +804,23 @@ function CreateItemForm({
           bookingDurationMin: values.bookingDurationMin ?? null,
         },
       })
-      if (photoDataUrl && created?.id) {
+      if (created?.id) {
         try {
-          await uploadInventoryItemPhotoFn({
-            data: { itemId: created.id, photoDataUrl },
-          })
+          if (photoDataUrl) {
+            // User picked/changed a photo → upload the data URL.
+            await uploadInventoryItemPhotoFn({
+              data: { itemId: created.id, photoDataUrl },
+            })
+          } else if (inheritedFromProductId) {
+            // Inherited from the linked HPP product ("Jual di POS") and
+            // left untouched → server-side S3 copy (no browser CORS).
+            await copyHppPhotoToInventoryItemFn({
+              data: {
+                itemId: created.id,
+                sourceProductId: inheritedFromProductId,
+              },
+            })
+          }
         } catch (photoErr) {
           // Item is already saved — surface the photo error but don't
           // block. User can re-add it from the detail page.
@@ -832,9 +848,16 @@ function CreateItemForm({
             {t('inventory.fieldPhoto')}
           </label>
           <PhotoUploadField
-            value={photoDataUrl}
-            onChange={setPhotoDataUrl}
+            value={photoDataUrl ?? inheritedPhotoUrl}
+            onChange={(next) => {
+              // Any manual change/removal takes over from the inherited
+              // HPP photo, so drop the inheritance markers.
+              setPhotoDataUrl(next)
+              setInheritedPhotoUrl(null)
+              setInheritedFromProductId(null)
+            }}
             disabled={form.formState.isSubmitting}
+            previewFit="contain"
           />
         </div>
         {/* Sumber HPP first — picking a link auto-fills Nama Item,

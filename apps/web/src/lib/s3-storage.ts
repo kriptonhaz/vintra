@@ -2,6 +2,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  CopyObjectCommand,
   ListObjectsV2Command,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3'
@@ -405,6 +406,37 @@ export async function deleteHppProductPhoto(key: string): Promise<void> {
   await getClient().send(
     new DeleteObjectCommand({ Bucket: getBucket(), Key: key }),
   )
+}
+
+/**
+ * Server-side copy of an HPP product photo into an inventory item's
+ * cover-photo key. Used by the "Jual di POS" bridge so the new
+ * inventory item inherits the product's photo without the browser ever
+ * touching S3 (a client-side fetch of the presigned URL would need
+ * bucket CORS; an in-bucket CopyObject doesn't). The copy gets its own
+ * `{tenantId}/inventory/{itemId}.{ext}` key so the two photos have
+ * independent lifecycles — deleting one never orphans the other.
+ */
+export async function copyHppPhotoToInventoryItem(params: {
+  srcKey: string
+  tenantId: string
+  itemId: string
+}): Promise<{ key: string }> {
+  // Preserve the source extension so ContentType stays consistent.
+  const ext = params.srcKey.split('.').pop()?.toLowerCase() || 'jpg'
+  const destKey = `${params.tenantId}/inventory/${params.itemId}.${ext}`
+  await getClient().send(
+    new CopyObjectCommand({
+      Bucket: getBucket(),
+      CopySource: `${getBucket()}/${params.srcKey}`,
+      Key: destKey,
+      MetadataDirective: 'COPY',
+      // Re-tag as inventory so the HPP lifecycle rule doesn't apply.
+      TaggingDirective: 'REPLACE',
+      Tagging: 'kind=inventory-item',
+    }),
+  )
+  return { key: destKey }
 }
 
 // ─── Tenant member (Anggota Tim) photos ──────────────────────────────

@@ -52,6 +52,12 @@ interface PhotoUploadFieldProps {
   quality?: number
   /** Size ceiling in KB (client + matches the server cap). Default 500. */
   maxKB?: number
+  /**
+   * How the preview image fits its box. `cover` (default) fills the
+   * box and crops overflow — right for uniform thumbnails. `contain`
+   * shows the whole image letterboxed inside the box without cropping.
+   */
+  previewFit?: 'cover' | 'contain'
 }
 
 /**
@@ -73,6 +79,7 @@ export function PhotoUploadField({
   maxEdge = 800,
   quality = 0.8,
   maxKB = 500,
+  previewFit = 'cover',
 }: PhotoUploadFieldProps) {
   // Two distinct hidden inputs — one with the camera capture hint,
   // one without. The chooser modal triggers whichever the user picked.
@@ -178,7 +185,12 @@ export function PhotoUploadField({
           <img
             src={value}
             alt="Pratinjau foto item"
-            className="h-40 w-full rounded-lg border border-gray-200 object-cover dark:border-gray-700"
+            className={cn(
+              'h-40 w-full rounded-lg border border-gray-200 dark:border-gray-700',
+              previewFit === 'contain'
+                ? 'bg-gray-50 object-contain dark:bg-gray-900'
+                : 'object-cover',
+            )}
           />
           <button
             type="button"

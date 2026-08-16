@@ -36,6 +36,7 @@ import {
   uploadInventoryGalleryPhoto,
   getInventoryPhotoSignedUrl,
   deleteInventoryPhoto,
+  copyHppPhotoToInventoryItem,
   parseDataUrl,
 } from '@/lib/s3-storage'
 import { randomUUID } from 'node:crypto'
@@ -1641,6 +1642,61 @@ export const uploadInventoryItemPhotoFn = createServerFn({ method: 'POST' })
       itemId: data.itemId,
       bytes,
       mimeType,
+    })
+
+    await db
+      .update(inventoryItems)
+      .set({ photoKey: key, updatedAt: new Date() })
+      .where(eq(inventoryItems.id, data.itemId))
+
+    return { photoKey: key }
+  })
+
+/**
+ * Inherit a linked HPP product's photo onto a freshly-created
+ * inventory item ("Jual di POS" bridge). Runs entirely server-side —
+ * an in-bucket S3 copy — so it works without the bucket exposing CORS
+ * for browser fetches of presigned URLs. No-op (returns null) when the
+ * source product has no photo.
+ */
+export const copyHppPhotoToInventoryItemFn = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      itemId: z.string().uuid(),
+      sourceProductId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const auth = await requireInventoryAccess()
+
+    const [item] = await db
+      .select({ id: inventoryItems.id })
+      .from(inventoryItems)
+      .where(
+        and(
+          eq(inventoryItems.id, data.itemId),
+          eq(inventoryItems.tenantId, auth.tenantId),
+        ),
+      )
+      .limit(1)
+    if (!item) throw new Error('Item tidak ditemukan')
+
+    const [product] = await db
+      .select({ photoKey: products.photoKey })
+      .from(products)
+      .where(
+        and(
+          eq(products.id, data.sourceProductId),
+          eq(products.tenantId, auth.tenantId),
+        ),
+      )
+      .limit(1)
+    if (!product?.photoKey) return { photoKey: null }
+
+    const { key } = await copyHppPhotoToInventoryItem({
+      srcKey: product.photoKey,
+      tenantId: auth.tenantId,
+      itemId: data.itemId,
     })
 
     await db

@@ -295,13 +295,15 @@ function CalculatePage() {
           sellingPrice: String(product.sellingPrice),
           competitors: { a: '', b: '', c: '' },
         })
-        setEditDataLoaded(true)
 
         // Seed the photo preview from the saved key. We pass the
         // signed URL as the PhotoUploadField value; photoChanged stays
         // false so we don't re-upload it unless the user picks a new
         // image. Failures (network, missing key) just fall through to
-        // the placeholder — non-fatal.
+        // the placeholder — non-fatal. This must run BEFORE
+        // setEditDataLoaded — flipping that flag re-renders and tears
+        // down this effect (cancelled = true), which would otherwise
+        // drop the awaited photo URL before it's applied.
         if (product.photoKey) {
           try {
             const urls = await getHppPhotoUrls({
@@ -315,6 +317,8 @@ function CalculatePage() {
             // ignore — placeholder is fine
           }
         }
+
+        if (!cancelled) setEditDataLoaded(true)
       } catch (err) {
         console.error('Failed to load product for edit:', err)
       }
@@ -322,7 +326,10 @@ function CalculatePage() {
 
     loadProduct()
     return () => { cancelled = true }
-  }, [editProductId, editDataLoaded, form, categories])
+    // `categories.length` (a primitive) instead of `categories` (a fresh
+    // array each render) keeps this effect from re-subscribing on every
+    // render and cancelling the in-flight load mid-flight.
+  }, [editProductId, editDataLoaded, form, categories.length])
 
   const { fields, append, remove } = useFieldArray({
     control: form.control,
@@ -2288,6 +2295,7 @@ function StepRingkasan({
               <PhotoUploadField
                 value={photoValue}
                 onChange={onPhotoChange}
+                previewFit="contain"
               />
             </div>
             <dl className="space-y-4">

@@ -738,6 +738,7 @@ function EditItemForm({
             value={photoValue}
             onChange={handlePhotoChange}
             disabled={form.formState.isSubmitting}
+            previewFit="contain"
           />
         </div>
         <div>
