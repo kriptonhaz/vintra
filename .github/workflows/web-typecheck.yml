@@ -1,0 +1,59 @@
+name: Web typecheck
+
+on:
+  pull_request:
+    paths:
+      - 'apps/web/**'
+      - 'packages/db/**'
+      - 'packages/shared/**'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/web-typecheck.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'packages/db/**'
+      - 'packages/shared/**'
+      # Included so edits to this workflow are exercised on main the moment
+      # they land, rather than lying dormant until someone touches apps/web.
+      - '.github/workflows/web-typecheck.yml'
+
+# Cancel an in-flight run when a newer commit lands on the same PR / branch
+concurrency:
+  group: web-typecheck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: build + tsc
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+
+      # `apps/web/src/routeTree.gen.ts` is gitignored, so a fresh checkout does
+      # not have it and `tsc` would fail on every route file with errors like
+      # "Argument of type '/terms' is not assignable to parameter of type
+      # 'undefined'". The tanstackStart vite plugin regenerates it as part of
+      # the build, which is also the only generator guaranteed to match what
+      # dev and ./deploy.sh produce — driving @tanstack/router-generator
+      # directly would couple CI to its internal API.
+      #
+      # DO NOT remove this step as "redundant with typecheck": it is what makes
+      # the typecheck meaningful. It also catches build regressions, which
+      # nothing else in CI does today (deploy.sh builds locally).
+      - name: Build web (generates routeTree.gen.ts)
+        run: bun run build
+
+      - name: Typecheck web
+        working-directory: apps/web
+        run: bun run typecheck
