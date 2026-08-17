@@ -34,6 +34,14 @@ jobs:
           publish: bun run changeset:tag
           title: "chore: version packages"
           commit: "chore: version packages"
+          # Don't let the action publish a GitHub Release per package. Two
+          # reasons: it duplicates the single `v{version}` release the next
+          # step already creates, and it posts the package's raw CHANGELOG
+          # entry as the release body — which GitHub rejects above 125,000
+          # characters. The 0.2.0 release absorbed a 458-changeset backlog,
+          # so three of four bodies blew past that limit and failed the job
+          # even though versioning and tagging had both succeeded.
+          createGithubReleases: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
