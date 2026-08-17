@@ -22,9 +22,15 @@ function apiUrl(path: string) {
 }
 
 async function apiFetch(path: string, init: RequestInit = {}) {
+  // `getRequestHeaders()` returns the H3 event's `req.headers`, i.e. a real
+  // `Headers` instance — `.get()` is always present. The old bracket-index
+  // fallback (`headers['authorization']`) was dead code for a plain-object
+  // shape this API never returns, and it was the only thing failing tsc:
+  // `TypedHeaders` has no index signature. This matches TanStack's own
+  // `getRequestHeader`, which is just `getRequestHeaders().get(name)`.
   const headers = getRequestHeaders()
-  const auth = headers.get?.('authorization') ?? headers['authorization'] ?? ''
-  const cookie = headers.get?.('cookie') ?? headers['cookie'] ?? ''
+  const auth = headers.get('authorization') ?? ''
+  const cookie = headers.get('cookie') ?? ''
 
   const res = await fetch(apiUrl(path), {
     ...init,
