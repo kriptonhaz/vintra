@@ -72,6 +72,38 @@ chmod 600 "$SSH_KEY"   # ssh refuses overly-permissive keys
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
+# ── Release layout (web) ───────────────────────────────────────────
+#
+# $REMOTE_DIR is a SYMLINK to the live release; the releases themselves
+# are immutable directories beside it:
+#
+#   ~/prod/Vintra-releases/<utc>-<sha>/   one full app tree each
+#   ~/prod/Vintra          -> symlink to the live one
+#   ~/prod/Vintra-shared/.env             survives every release
+#
+# Why, instead of syncing into one directory in place:
+#
+# The build splits routes into hash-named chunks that the server imports
+# lazily, on the first request that needs them. Overwriting the live tree
+# while the old processes are still serving deletes chunks they have not
+# imported yet, and the next request for that route dies with
+# ERR_MODULE_NOT_FOUND. The `rm -rf node_modules` this script used to do
+# mid-flight does the same to any dependency not yet required. Both hit
+# JuraganQu in production on 2026-08-17 — a ~20-second window per deploy,
+# on a POS taking a couple of sales a minute. Vintra ran the identical
+# script, so it had the identical window.
+#
+# Releases remove the window rather than shrinking it. Node resolves
+# module paths through to their realpath, so a process that started
+# before the swap keeps loading from its own release directory for its
+# whole life, even after the symlink points elsewhere. Nothing under a
+# running process ever changes; it only sees new code when it is
+# restarted, one instance at a time.
+RELEASES_DIR="${REMOTE_DIR}-releases"
+SHARED_DIR="${REMOTE_DIR}-shared"
+# Kept for rollback. 3 × ~1 GB against 45 GB free is not worth trimming.
+KEEP_RELEASES=3
+
 # ── Helpers ────────────────────────────────────────────────────────
 
 remote_install_and_restart() {
@@ -88,7 +120,8 @@ remote_install_and_restart() {
   # expanded BEFORE the heredoc is sent (note the unquoted EOF).
   # Variables that should evaluate on the REMOTE shell are escaped
   # with backslashes (\$VAR, \$(cmd)).
-  echo "→ Installing prod deps + rolling restart of PM2 web apps..."
+  local release_path="$1"
+  echo "→ Installing prod deps + swapping release + rolling restart..."
   ssh $SSH_OPTS "$SERVER" bash <<EOF
     set -e
     # Non-interactive ssh skips ~/.bashrc, so nvm (where node + pm2
@@ -99,16 +132,26 @@ remote_install_and_restart() {
     export PATH="\$HOME/.bun/bin:\$PATH"
     command -v bun >/dev/null || { echo "✗ bun not found on server PATH"; exit 1; }
     command -v pm2 >/dev/null || { echo "✗ pm2 not found — try: bun install -g pm2"; exit 1; }
-    cd "$REMOTE_DIR"
-    # Clean stale node_modules before each install. Without this,
-    # workspace dep reshuffles (e.g. adding apps/mobile bumped React
-    # to root-only hoisting) leave the OLD nested copies in place,
-    # which then collide with the new ones at runtime — see the May
-    # 2026 SSR outage when two React 19 copies broke the hook
-    # dispatcher. ~5s overhead per deploy, prevents a whole class of
-    # "works on my install, breaks on yours" mismatches.
-    rm -rf node_modules apps/*/node_modules packages/*/node_modules
+
+    # Each release installs its own node_modules. That is what the old
+    # in-place "rm -rf node_modules" was really after — a tree with no
+    # leftovers from a previous dependency layout (see the May 2026 SSR
+    # outage when two React 19 copies broke the hook dispatcher) — except
+    # a fresh directory gets it without yanking modules out from under
+    # the processes that are still serving.
+    cd "$release_path"
     bun install --production
+
+    # Remember where to go back to if the new release won't serve. On the
+    # migration run there is no symlink yet, so fall back to the tree we
+    # just retired — that is precisely the code still running.
+    PREVIOUS_RELEASE=""
+    if [ -L "$REMOTE_DIR" ]; then
+      PREVIOUS_RELEASE="\$(readlink -f "$REMOTE_DIR")"
+    else
+      PREVIOUS_RELEASE="\$(ls -1dt "$RELEASES_DIR"/legacy-*/ 2>/dev/null | head -1)"
+      PREVIOUS_RELEASE="\${PREVIOUS_RELEASE%/}"
+    fi
 
     # Restart helper: kicks an app and polls its port until 200 OK
     # before returning. 15s timeout = enough for a cold-start +
@@ -132,14 +175,50 @@ remote_install_and_restart() {
       return 1
     }
 
+    # Atomic cutover. \`ln -sfn\` into a temp name then \`mv -T\` is a
+    # single rename() syscall: the symlink never spends an instant
+    # missing or pointing at nothing, so a concurrent spawn cannot
+    # observe a half-swapped state. (\`ln -sfn\` straight onto an
+    # existing symlink is NOT atomic — it unlinks first.)
+    echo "→ Cutting over to \$(basename "$release_path")"
+    ln -sfn "$release_path" "${REMOTE_DIR}.tmp"
+    mv -Tf "${REMOTE_DIR}.tmp" "$REMOTE_DIR"
+
+    # Everything below runs from the SYMLINK, never the release path.
+    # \`pm2 start\` records its cwd verbatim, so starting from the real
+    # directory would pin PM2 to one release and quietly undo all of
+    # this on the next deploy.
+    cd "$REMOTE_DIR"
+
+    # Roll the symlink back if the new release refuses to serve.
+    # Restarting is what exposes a bad build, and by then the symlink has
+    # already moved — without this the box is left pointing at code that
+    # does not boot.
+    roll_back() {
+      if [ -z "\$PREVIOUS_RELEASE" ] || [ ! -d "\$PREVIOUS_RELEASE" ]; then
+        echo "  ✗ No previous release to fall back to — leaving as-is." >&2
+        return 1
+      fi
+      echo "  ↩ Rolling back to \$(basename "\$PREVIOUS_RELEASE")" >&2
+      ln -sfn "\$PREVIOUS_RELEASE" "${REMOTE_DIR}.tmp"
+      mv -Tf "${REMOTE_DIR}.tmp" "$REMOTE_DIR"
+      pm2 restart vintra-web-a --update-env || true
+      pm2 restart vintra-web-b --update-env || true
+      return 1
+    }
+
     # Three-way state machine:
     #   1. Both -a and -b exist (steady state) → rolling restart
     #   2. Only legacy vintra-web exists → fall through to first-time
     #      branch which deletes it + starts both fresh
     #   3. Nothing exists → first-time start of both
+    #
+    # Until each instance is restarted it keeps running the PREVIOUS
+    # release out of its own directory, which is why old releases are
+    # pruned at the very end rather than here.
     if pm2 describe vintra-web-a > /dev/null 2>&1 && pm2 describe vintra-web-b > /dev/null 2>&1; then
-      restart_one vintra-web-a 3000
-      restart_one vintra-web-b 3001
+      restart_one vintra-web-a 3000 || roll_back
+      restart_one vintra-web-b 3001 || roll_back
     else
       # Either first deploy on this box, OR transitional cutover
       # from the legacy single-app setup. In both cases: nuke any
@@ -151,8 +230,19 @@ remote_install_and_restart() {
       pm2 delete vintra-web-a > /dev/null 2>&1 || true
       pm2 delete vintra-web-b > /dev/null 2>&1 || true
       pm2 start ecosystem.config.cjs
-      pm2 save
     fi
+    pm2 save
+
+    # Prune only now that both instances run the new release — anything
+    # still held open by a live process has already been retired.
+    LIVE="\$(readlink -f "$REMOTE_DIR")"
+    ls -1dt "$RELEASES_DIR"/*/ 2>/dev/null | tail -n +$((KEEP_RELEASES + 1)) | while read -r old; do
+      old="\${old%/}"
+      [ "\$old" = "\$LIVE" ] && continue
+      echo "  · pruning \$(basename "\$old")"
+      rm -rf "\$old"
+    done
+
     pm2 status
 EOF
 }
@@ -166,34 +256,87 @@ deploy_web() {
     exit 1
   fi
 
-  ssh $SSH_OPTS "$SERVER" \
-    "mkdir -p $REMOTE_DIR/apps/web/dist $REMOTE_DIR/apps/mobile $REMOTE_DIR/packages/db $REMOTE_DIR/packages/shared"
+  local short_sha release_name release_path
+  short_sha="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
+  release_name="$(date -u +%Y%m%d-%H%M%S)-${short_sha}"
+  release_path="${RELEASES_DIR}/${release_name}"
 
+  # One-time migration off the old single-directory layout, plus the
+  # per-release scaffolding. Everything here is additive: the live tree
+  # keeps serving from its own inodes throughout, since moving a
+  # directory on the same filesystem is a rename, not a copy.
+  echo "→ Preparing release $release_name"
+  ssh $SSH_OPTS "$SERVER" bash <<EOF
+    set -e
+    mkdir -p "$RELEASES_DIR" "$SHARED_DIR"
+
+    # .env lives outside the releases and is symlinked into each one, so
+    # the documented "edit ~/prod/Vintra/.env" flow still lands on the
+    # same file and survives every deploy.
+    if [ ! -f "$SHARED_DIR/.env" ] && [ -f "$REMOTE_DIR/.env" ]; then
+      # COPY, not move. The live processes read their env at boot so they
+      # don't need the file any more — but if one happened to crash and
+      # respawn mid-migration, --env-file would fail on a missing file.
+      # The stale copy leaves with the legacy release when it is pruned.
+      echo "  · copying .env into $SHARED_DIR"
+      cp -p "$REMOTE_DIR/.env" "$SHARED_DIR/.env"
+    fi
+
+    # Old layout: \$REMOTE_DIR is a real directory. Retire it INTO the
+    # releases dir rather than deleting it — the processes running right
+    # now still hold it open and must keep working until they restart.
+    #
+    # The symlink is re-pointed at the retired tree IMMEDIATELY, before
+    # the rsync and install that follow. Without that, \$REMOTE_DIR would
+    # not exist at all for the ~30-60s until cutover, and PM2's recorded
+    # cwd (~/prod/Vintra/apps/web) would resolve to nothing — so an
+    # autorestart landing in that window (a crash, or the 400M
+    # max_memory_restart) could not boot. Pointing it at the legacy tree
+    # keeps the path valid the whole time; the real cutover later swaps
+    # it atomically.
+    if [ -e "$REMOTE_DIR" ] && [ ! -L "$REMOTE_DIR" ]; then
+      LEGACY="$RELEASES_DIR/legacy-\$(date -u +%Y%m%d-%H%M%S)"
+      echo "  · migrating existing tree to \$(basename "\$LEGACY")"
+      mv "$REMOTE_DIR" "\$LEGACY"
+      ln -sfn "\$LEGACY" "$REMOTE_DIR"
+    fi
+
+    mkdir -p "$release_path/apps/web/dist" "$release_path/apps/mobile" \
+             "$release_path/packages/db" "$release_path/packages/shared"
+    ln -sfn "$SHARED_DIR/.env" "$release_path/.env"
+EOF
+
+  # rsync straight into the fresh release. No --delete needed: the target
+  # starts empty, which is the whole point — nothing that a running
+  # process might still import is ever removed.
   echo "→ Syncing web build output (apps/web/dist/)..."
-  rsync -avz --delete -e "ssh $SSH_OPTS" \
+  rsync -avz -e "ssh $SSH_OPTS" \
     apps/web/dist/ \
-    "$SERVER:$REMOTE_DIR/apps/web/dist/"
+    "$SERVER:$release_path/apps/web/dist/"
 
   echo "→ Syncing server entry + workspace package metadata..."
   rsync -avz -e "ssh $SSH_OPTS" \
     apps/web/server-entry.mjs \
     apps/web/package.json \
-    "$SERVER:$REMOTE_DIR/apps/web/"
+    "$SERVER:$release_path/apps/web/"
 
+  # bunfig.toml is NOT optional: it pins `linker = "hoisted"`, without
+  # which bun installs per-peer-context duplicates of vite and the
+  # TanStack Start plugin loads a different instance than the CLI.
   rsync -avz -e "ssh $SSH_OPTS" \
     package.json \
     bun.lock \
     bunfig.toml \
     ecosystem.config.cjs \
-    "$SERVER:$REMOTE_DIR/"
+    "$SERVER:$release_path/"
 
   rsync -avz -e "ssh $SSH_OPTS" \
     packages/db/package.json \
-    "$SERVER:$REMOTE_DIR/packages/db/"
+    "$SERVER:$release_path/packages/db/"
 
   rsync -avz -e "ssh $SSH_OPTS" \
     packages/shared/package.json \
-    "$SERVER:$REMOTE_DIR/packages/shared/"
+    "$SERVER:$release_path/packages/shared/"
 
   # Mobile workspace must exist on the server even though we don't run
   # it there — the root `apps/*` workspace glob in package.json + the
@@ -203,9 +346,9 @@ deploy_web() {
   # call `bun run --filter @vintra/mobile <anything>` on the server).
   rsync -avz -e "ssh $SSH_OPTS" \
     apps/mobile/package.json \
-    "$SERVER:$REMOTE_DIR/apps/mobile/"
+    "$SERVER:$release_path/apps/mobile/"
 
-  remote_install_and_restart
+  remote_install_and_restart "$release_path"
 }
 
 deploy_api() {

@@ -26,12 +26,12 @@ independently with different supervisors:
 |---|---|---|
 | **URL** | https://vintra.my.id | https://api.vintra.my.id |
 | **Runtime** | Node 22 (TanStack Start SSR) | Go static binary (Fiber + whatsmeow) |
-| **Supervisor** | PM2 (`vintra-web`) | systemd (`vintra-api`) |
+| **Supervisor** | PM2 (`vintra-web-a` + `vintra-web-b`) | systemd (`vintra-api`) |
 | **Port** | 3000 (behind nginx) | 4099 (behind nginx) |
 | **Build location** | Local — `bun run build` then rsync `dist/` | Local — `go build` cross-compile to linux/amd64 then rsync binary |
 | **Deps install on server** | `bun install --production` | None — static binary |
-| **Repo path on server** | `~/prod/Vintra` | `~/prod/vintra-api` |
-| **.env path on server** | `~/prod/Vintra/.env` (Node `--env-file`) | `~/prod/vintra-api/.env` (systemd `EnvironmentFile=`) |
+| **Repo path on server** | `~/prod/Vintra` → symlink to the live release under `~/prod/Vintra-releases/` | `~/prod/vintra-api` |
+| **.env path on server** | `~/prod/Vintra/.env` → `~/prod/Vintra-shared/.env` (Node `--env-file`) | `~/prod/vintra-api/.env` (systemd `EnvironmentFile=`) |
 
 **VPS:** `ubuntu@15.232.90.20` (Lightsail, region ap-southeast-3 / Jakarta)
 
@@ -51,9 +51,40 @@ Each command is independent — deploy one without touching the other.
 
 ### What `./deploy.sh web` does
 
+Web is deployed as **immutable releases behind a symlink**, never by
+overwriting the live tree:
+
+```
+~/prod/Vintra-releases/<utc>-<sha>/    one full app tree per deploy
+~/prod/Vintra          -> symlink to the live release
+~/prod/Vintra-shared/.env              survives every release
+```
+
 1. `bun run build` locally → `apps/web/dist/{client,server}`
-2. rsync `apps/web/dist/`, `server-entry.mjs`, workspace `package.json`s, `bun.lock`, `ecosystem.config.cjs` to `~/prod/Vintra/`
-3. SSH → `bun install --production` → `pm2 restart vintra-web --update-env`
+2. rsync `apps/web/dist/`, `server-entry.mjs`, workspace `package.json`s,
+   `bun.lock`, `bunfig.toml`, `ecosystem.config.cjs` into a **fresh**
+   release directory
+3. SSH → `bun install --production` inside that release
+4. Atomic cutover: `ln -sfn` + `mv -T` swaps `~/prod/Vintra` in one
+   `rename()` syscall
+5. Rolling restart `vintra-web-a` → `vintra-web-b`, health-checking each.
+   A failed check rolls the symlink back and restarts
+6. Prune old releases, keeping the last 3 for rollback
+
+**Why releases instead of syncing in place.** The build splits routes into
+hash-named chunks the server imports lazily. Overwriting the live tree while
+the old processes are still serving deletes chunks they have not imported
+yet, and the next request for that route dies with `ERR_MODULE_NOT_FOUND`;
+wiping `node_modules` mid-flight does the same to any dependency not yet
+required. Both hit JuraganQu in production on 2026-08-17 — a ~20-second
+window per deploy. Node resolves module paths to their realpath, so a
+process started before the swap keeps loading from its own release for its
+whole life and only sees new code when it is restarted.
+
+**`.env` is unchanged in practice.** It lives in `~/prod/Vintra-shared/` and
+is symlinked into every release, so editing `~/prod/Vintra/.env` still lands
+on the same file and now survives deploys. The first deploy copies the
+existing file there automatically.
 
 ### What `./deploy.sh api` does
 
