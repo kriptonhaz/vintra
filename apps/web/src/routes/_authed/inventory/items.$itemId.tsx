@@ -1242,6 +1242,7 @@ function UnitConversionsSection({
             baseUnitLabel={baseUnit?.label ?? ''}
             costPerBaseUnit={baseCostPerBaseUnit}
             itemId={item.id}
+            linkedHppProductId={item.linkedHppProductId ?? null}
             busy={busy}
             setBusy={setBusy}
             onChange={onChange}
@@ -1308,6 +1309,12 @@ interface UnitCardProps {
   baseUnitLabel: string
   costPerBaseUnit: number
   itemId: string
+  /**
+   * Set when this item's price is owned by an HPP recipe. The price controls
+   * are replaced by a link to where the price actually lives — hiding them
+   * without saying where to go would just look broken.
+   */
+  linkedHppProductId: string | null
   busy: boolean
   setBusy: (b: boolean) => void
   onChange: () => void
@@ -1320,6 +1327,7 @@ function UnitCard({
   baseUnitLabel,
   costPerBaseUnit,
   itemId,
+  linkedHppProductId,
   busy,
   setBusy,
   onChange,
@@ -1489,9 +1497,28 @@ function UnitCard({
         </p>
       )}
 
-      {/* Add tier inline. Stacks vertically on mobile so each input
-          gets a full-width tap area; collapses to a 3-column row on
-          tablet+ where the editor has more horizontal room. */}
+      {/* Price is owned by the recipe. Point at where it lives rather than
+          just disabling the inputs — a dead form with no explanation reads as
+          a bug. Deep-links to step 3, where the selling price actually is,
+          instead of dropping the owner on the HPP list to find the product
+          again. */}
+      {linkedHppProductId ? (
+        <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm dark:border-gray-700 dark:bg-gray-800/50">
+          <p className="text-gray-700 dark:text-gray-300">
+            Harga item ini <span className="font-medium">mengikuti produk HPP-nya</span>.
+          </p>
+          <Link
+            to="/hpp/calculate"
+            search={{ edit: linkedHppProductId, step: 3 } as never}
+            className="mt-1 inline-flex items-center gap-1 font-medium text-brand-600 hover:underline dark:text-brand-400"
+          >
+            Ubah harga jual di HPP →
+          </Link>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Tier grosir dan unit lain tetap diatur di sini.
+          </p>
+        </div>
+      ) : (
       <div className="mt-2 flex flex-col gap-2 sm:grid sm:grid-cols-[100px_1fr_auto] sm:gap-1.5">
         <div>
           <label className="mb-0.5 block text-[11px] font-medium text-gray-500 sm:hidden">
@@ -1529,6 +1556,7 @@ function UnitCard({
           Tambah Tier
         </Button>
       </div>
+      )}
       {(() => {
         const draft = Number(draftPrice)
         if (!Number.isFinite(draft) || draft <= 0 || costPerUnit <= 0) return null

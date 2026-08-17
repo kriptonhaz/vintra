@@ -48,6 +48,7 @@ import {
   previewMaterialPriceChange,
   summarizeImpact,
 } from '../lib/hpp-cascade'
+import { syncPosPriceFromHppProduct } from '../lib/pos-price-sync'
 
 // ─── Tenant Categories ───────────────────────────────
 
@@ -509,13 +510,36 @@ export const updateProduct = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const { tenantId } = await requireAuth()
     const { id, ...updates } = data
-    const [product] = await db
-      .update(products)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(and(eq(products.id, id), eq(products.tenantId, tenantId)))
-      .returning()
-    if (!product) throw new Error('Produk tidak ditemukan')
-    return product
+
+    // The price write and the POS sync share a transaction: a recipe's selling
+    // price must never be committed while the till is still quoting the old
+    // one.
+    const { product, priceSync } = await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(products)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(and(eq(products.id, id), eq(products.tenantId, tenantId)))
+        .returning()
+      if (!updated) throw new Error('Produk tidak ditemukan')
+
+      // Push the new selling price onto the linked POS item. Scoped to THIS
+      // product — a tenant-wide pass would silently resolve divergences on
+      // products priced differently on purpose. Only when a price was actually
+      // submitted, so renaming a product touches no till.
+      const sync =
+        updates.sellingPrice !== undefined
+          ? await syncPosPriceFromHppProduct(
+              tenantId,
+              id,
+              Number(updated.sellingPrice),
+              tx,
+            )
+          : null
+
+      return { product: updated, priceSync: sync }
+    })
+
+    return { ...product, posPriceSync: priceSync }
   })
 
 export const deleteProduct = createServerFn({ method: 'POST' })

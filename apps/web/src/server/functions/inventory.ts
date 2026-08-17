@@ -36,6 +36,10 @@ import { NOTIFICATION_TYPES } from '@vintra/shared'
 import { statedUnitCost } from '../lib/stock-cost'
 import { perUnitHpp } from '@/lib/hpp-calculator'
 import {
+  syncPosPriceFromHppProduct,
+  POS_PRICE_READONLY_ERROR,
+} from '../lib/pos-price-sync'
+import {
   recalcTenantHpp,
   summarizeImpact,
   DANGER_MARGIN,
@@ -1092,6 +1096,31 @@ export const createInventoryItem = createServerFn({ method: 'POST' })
           unitPrice: data.initialSellingPrice.toString(),
           sortOrder: 0,
         })
+      }
+
+      // A recipe-linked item adopts its product's price straight away. Its own
+      // price field is read-only from here on, so leaving whatever the form
+      // submitted would strand it at a number nobody can correct from this
+      // screen.
+      if (data.linkedHppProductId) {
+        const [linkedProduct] = await tx
+          .select({ sellingPrice: products.sellingPrice })
+          .from(products)
+          .where(
+            and(
+              eq(products.id, data.linkedHppProductId),
+              eq(products.tenantId, auth.tenantId),
+            ),
+          )
+          .limit(1)
+        if (linkedProduct) {
+          await syncPosPriceFromHppProduct(
+            auth.tenantId,
+            data.linkedHppProductId,
+            Number(linkedProduct.sellingPrice ?? 0),
+            tx,
+          )
+        }
       }
 
       return item
@@ -2947,6 +2976,24 @@ export const upsertPricingTier = createServerFn({ method: 'POST' })
   .inputValidator(tierInput)
   .handler(async ({ data }) => {
     const auth = await requireInventoryAccess()
+
+    // A recipe-linked item's price is owned by its HPP product — refuse here
+    // rather than only disabling the field in the web form, because the mobile
+    // app calls this same function. Hiding an input protects one client; this
+    // protects the rule.
+    const [linked] = await db
+      .select({ linkedHppProductId: inventoryItems.linkedHppProductId })
+      .from(inventoryItems)
+      .where(
+        and(
+          eq(inventoryItems.id, data.itemId),
+          eq(inventoryItems.tenantId, auth.tenantId),
+        ),
+      )
+      .limit(1)
+    if (linked?.linkedHppProductId) {
+      throw new Error(POS_PRICE_READONLY_ERROR)
+    }
 
     // Sanity: the (item, unit) row must exist so we don't price a unit
     // the cashier can't actually pick.
