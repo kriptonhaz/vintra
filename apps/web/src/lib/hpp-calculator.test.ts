@@ -49,17 +49,46 @@ describe('bomRowUnitPrice — sub-product rows', () => {
     ).toBe(0)
   })
 
-  it('does not divide by a zero or missing batch yield', () => {
+  // These pin the calculator's own fallback (calculate.tsx:266-269): a
+  // missing or zero batch yield divides by ONE, so the row costs a full
+  // batch. Pricing it at 0 would be tidier in isolation and WRONG here —
+  // the server would then disagree with the screen the owner prices from.
+  it('divides by one when the batch yield is zero or missing', () => {
     expect(
       bomRowUnitPrice({ kind: 'sub-product', sourceHpp: 42_000, sourceProductionQty: 0 }),
-    ).toBe(0)
+    ).toBe(42_000)
     expect(
       bomRowUnitPrice({
         kind: 'sub-product',
         sourceHpp: 42_000,
         sourceProductionQty: null,
       }),
-    ).toBe(0)
+    ).toBe(42_000)
+  })
+
+  it('matches calculate.tsx arithmetic exactly', () => {
+    // Same inputs through the screen's own expression.
+    const asScreenDoes = (hpp: unknown, qty: unknown) => {
+      const totalHpp = Number(hpp ?? 0)
+      const rawQty = Number(qty ?? 1)
+      const prodQty = rawQty > 0 ? rawQty : 1
+      return prodQty > 0 ? totalHpp / prodQty : totalHpp
+    }
+    for (const [hpp, qty] of [
+      [42_000, 40],
+      [42_000, 0],
+      [42_000, null],
+      [0, 40],
+      [1_337, 7],
+    ] as const) {
+      expect(
+        bomRowUnitPrice({
+          kind: 'sub-product',
+          sourceHpp: hpp,
+          sourceProductionQty: qty,
+        }),
+      ).toBe(asScreenDoes(hpp, qty))
+    }
   })
 })
 

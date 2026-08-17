@@ -50,14 +50,25 @@ export type BomRowPricing =
  * A recipe row is EITHER material-sourced or sub-product-sourced (the DB
  * CHECK on `product_materials` enforces `materialId XOR sourceProductId`).
  * A sub-product's per-unit price is its batch cost divided by what one batch
- * yields — the same convention `getProductForEdit` and the calculator UI use,
- * so the server and the screen agree on the number.
+ * yields.
  *
- * Anything missing or nonsensical (no stored HPP, a zero or absent batch
- * yield) prices at 0 rather than NaN: one incomplete sub-recipe must not
- * poison the entire product's HPP. The row still appears in the cost
- * breakdown, so the gap stays visible instead of silently vanishing — which
- * is exactly the failure this function exists to prevent.
+ * FAITHFUL REPLICATION OF THE CALCULATOR IS THE POINT. This mirrors
+ * `calculate.tsx` exactly — the screen owners actually price their menu
+ * from — rather than doing something arguably tidier:
+ *
+ *   const rawQty  = Number(sourceProductionQty ?? 1)
+ *   const prodQty = rawQty > 0 ? rawQty : 1
+ *   const perUnit = totalHpp / prodQty
+ *
+ * So a missing or zero batch yield divides by ONE, i.e. the row costs the
+ * full batch — it does not price at zero. That looks like the unsafe choice
+ * in isolation, but the alternative is a server number that disagrees with
+ * the screen, which is the exact failure this function exists to prevent.
+ * An unset yield is also the honest reading: "one batch makes one unit".
+ *
+ * A missing stored HPP still yields 0 — nothing is known about that cost yet,
+ * and inventing one would be worse. The row stays visible in the breakdown
+ * either way, so a gap is never silent.
  */
 export function bomRowUnitPrice(row: BomRowPricing): number {
   if (row.kind === 'material') {
@@ -65,10 +76,9 @@ export function bomRowUnitPrice(row: BomRowPricing): number {
     return Number.isFinite(price) ? price : 0
   }
   const batchCost = Number(row.sourceHpp ?? 0)
-  const yieldQty = Number(row.sourceProductionQty ?? 0)
-  if (!Number.isFinite(batchCost) || !Number.isFinite(yieldQty) || yieldQty <= 0) {
-    return 0
-  }
+  if (!Number.isFinite(batchCost)) return 0
+  const rawQty = Number(row.sourceProductionQty ?? 1)
+  const yieldQty = Number.isFinite(rawQty) && rawQty > 0 ? rawQty : 1
   return batchCost / yieldQty
 }
 
