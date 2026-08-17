@@ -411,8 +411,8 @@ function ImportPage() {
                     ) : 'sellingPrice' in r ? (
                       <>
                         <TableCell className="text-right text-sm">
-                          {r.hpp != null
-                            ? formatRupiah(Number(r.hpp))
+                          {r.hppPerUnit != null
+                            ? formatRupiah(Number(r.hppPerUnit))
                             : '—'}
                         </TableCell>
                         <TableCell className="text-right text-sm">

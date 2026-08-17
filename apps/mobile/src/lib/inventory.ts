@@ -570,7 +570,14 @@ export interface HppProductCandidate {
   name: string
   category: string | null
   sellingPrice: string
+  /** Cost of one FULL BATCH (productionQty units) — not what an item costs. */
   hpp: string | null
+  /**
+   * `hpp` divided by the batch yield: the figure that actually becomes the
+   * inventory item's Modal. Show this, not `hpp`, or the number changes the
+   * moment the product is imported.
+   */
+  hppPerUnit: number | null
   alreadyImported: boolean
 }
 

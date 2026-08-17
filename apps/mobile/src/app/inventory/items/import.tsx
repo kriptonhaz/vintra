@@ -551,7 +551,7 @@ function ProductCard({
                 fontSize={11}
                 color={COLORS.onSurface}
               />
-              {p.hpp ? ` · HPP ${Number(p.hpp).toLocaleString('id-ID')}` : ''}
+              {p.hppPerUnit ? ` · HPP ${Number(p.hppPerUnit).toLocaleString('id-ID')}/unit` : ''}
             </Stat>
           </YStack>
         </XStack>

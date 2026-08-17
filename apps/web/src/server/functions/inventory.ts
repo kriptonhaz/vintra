@@ -34,6 +34,7 @@ import {
 import { createNotification } from '../notifications'
 import { NOTIFICATION_TYPES } from '@vintra/shared'
 import { statedUnitCost } from '../lib/stock-cost'
+import { perUnitHpp } from '@/lib/hpp-calculator'
 import {
   recalcTenantHpp,
   summarizeImpact,
@@ -1143,6 +1144,7 @@ export const getHppImportCandidates = createServerFn().handler(async () => {
         category: products.category,
         sellingPrice: products.sellingPrice,
         hpp: products.hpp,
+        productionQty: products.productionQty,
       })
       .from(products)
       .where(eq(products.tenantId, auth.tenantId))
@@ -1179,7 +1181,17 @@ export const getHppImportCandidates = createServerFn().handler(async () => {
     skuCap: limits.skuCap,
     skuCount: countRow[0]?.count ?? 0,
     materials: mats.map((m) => ({ ...m, alreadyImported: linkedMat.has(m.id) })),
-    products: prods.map((p) => ({ ...p, alreadyImported: linkedProd.has(p.id) })),
+    // `hpp` is a FULL BATCH. The picker must show what will actually become
+    // the item's Modal — the per-unit figure — or the number changes the
+    // moment the product is imported.
+    products: prods.map((p) => ({
+      ...p,
+      hppPerUnit:
+        p.hpp != null
+          ? perUnitHpp(Number(p.hpp), Number(p.productionQty ?? 0))
+          : null,
+      alreadyImported: linkedProd.has(p.id),
+    })),
   }
 })
 
@@ -1259,6 +1271,7 @@ export const bulkCreateInventoryItemsFromHpp = createServerFn({ method: 'POST' }
               name: products.name,
               sellingPrice: products.sellingPrice,
               hpp: products.hpp,
+              productionQty: products.productionQty,
             })
             .from(products)
             .where(
@@ -1323,7 +1336,13 @@ export const bulkCreateInventoryItemsFromHpp = createServerFn({ method: 'POST' }
           const p = prodById.get(draft.hppId)!
           name = p.name
           baseUnitId = draft.baseUnitId
-          costPrice = p.hpp != null ? Number(p.hpp) : 0
+          // `products.hpp` is a FULL BATCH; `costPrice` is per base unit.
+          // Without dividing, a 40-piece cookie recipe seeded a 40x cost and
+          // the item read "Rugi" on a product with an 84% margin.
+          costPrice =
+            p.hpp != null
+              ? perUnitHpp(Number(p.hpp), Number(p.productionQty ?? 0))
+              : 0
           // Seed the HPP selling price so a POS-visible product isn't
           // listed at Rp 0.
           sellingPrice = draft.isSellable ? Number(p.sellingPrice) : null
@@ -3187,6 +3206,7 @@ export const listInventoryFormMasters = createServerFn().handler(async () => {
           //                    so a fresh copy lands on the inventory
           //                    item — independent S3 lifecycle)
           productionUnit: products.productionUnit,
+          productionQty: products.productionQty,
           category: products.category,
           sellingPrice: products.sellingPrice,
           hpp: products.hpp,
@@ -3204,6 +3224,7 @@ export const listInventoryFormMasters = createServerFn().handler(async () => {
           products.name,
           products.sku,
           products.productionUnit,
+          products.productionQty,
           products.category,
           products.sellingPrice,
           products.hpp,
@@ -3229,7 +3250,16 @@ export const listInventoryFormMasters = createServerFn().handler(async () => {
     branches: branchList,
     suppliers: supplierList,
     hppMaterials,
-    hppProducts,
+    // `hpp` is a FULL BATCH. Ship the per-unit figure alongside it so no
+    // caller has to remember to divide — forgetting is exactly what seeded a
+    // 40x cost onto every cookie item.
+    hppProducts: hppProducts.map((p) => ({
+      ...p,
+      hppPerUnit:
+        p.hpp != null
+          ? perUnitHpp(Number(p.hpp), Number(p.productionQty ?? 0))
+          : null,
+    })),
   }
 })
 

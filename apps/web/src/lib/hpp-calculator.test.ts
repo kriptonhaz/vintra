@@ -162,3 +162,37 @@ describe('zero-cost stock movement guard', () => {
     expect(calculateMaterialCost(priceAfter, 20)).toBe(180)
   })
 })
+
+describe('regression: an HPP product\'s cost reaching inventory and POS', () => {
+  // Reported from the HaRa Cookies tenant. "Cookies Alpukat": a batch costs
+  // Rp 25.308,57 and yields 40 pieces, so a piece costs Rp 632,71 against a
+  // Rp 4.000 selling price — an 84% margin.
+  //
+  // The batch figure was copied straight into the inventory item's costPrice
+  // and into the POS cost snapshot, both of which are PER UNIT. The item then
+  // displayed "Modal Rp 25.308,57 / Pieces" and a red "Rugi" badge on a
+  // product that earns Rp 3.367 per piece.
+  const BATCH_HPP = 25_308.57
+  const YIELD = 40
+  const SELLING = 4_000
+
+  it('a piece costs the batch divided by the yield', () => {
+    expect(perUnitHpp(BATCH_HPP, YIELD)).toBeCloseTo(632.71, 2)
+  })
+
+  it('the product is profitable, not a loss', () => {
+    const unitCost = perUnitHpp(BATCH_HPP, YIELD)
+    expect(SELLING - unitCost).toBeGreaterThan(0)
+    expect(calculateMargin(SELLING, unitCost)).toBeCloseTo(84.2, 1)
+  })
+
+  it('using the batch cost per unit is what produced the false loss', () => {
+    // What the buggy path stored, kept as the thing NOT to do.
+    expect(SELLING - BATCH_HPP).toBeLessThan(0)
+    expect(calculateMargin(SELLING, BATCH_HPP)).toBeLessThan(0)
+  })
+
+  it('a single-yield recipe is unaffected either way', () => {
+    expect(perUnitHpp(5_000, 1)).toBe(5_000)
+  })
+})

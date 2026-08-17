@@ -46,6 +46,7 @@ import {
 } from '@vintra/shared'
 import { requirePOSAccess } from '../middleware/module-access'
 import { isPriceChanged } from '../lib/pos-price-guard'
+import { perUnitHpp } from '@/lib/hpp-calculator'
 import {
   writePosSaleCashflowEntry,
   removePosSaleCashflowEntry,
@@ -1160,12 +1161,20 @@ export const createSale = createServerFn({ method: 'POST' })
             .select({
               id: products.id,
               hpp: products.hpp,
+              productionQty: products.productionQty,
             })
             .from(products)
             .where(inArray(products.id, linkedProductIds))
         : []
+    // `products.hpp` is the cost of a FULL BATCH (productionQty units), while
+    // this map feeds a PER-BASE-UNIT cost. Copying it across without dividing
+    // recorded a 40x cost for a 40-piece cookie recipe, so every sale of it
+    // looked like a heavy loss in the margin reports.
     const hppByProductId = new Map(
-      productHpps.map((p) => [p.id, Number(p.hpp ?? 0)]),
+      productHpps.map((p) => [
+        p.id,
+        perUnitHpp(Number(p.hpp ?? 0), Number(p.productionQty ?? 0)),
+      ]),
     )
     const itemMap = new Map(itemRows.map((i) => [i.id, i]))
 

@@ -725,7 +725,9 @@ function CreateItemForm({
     // Harga Pokok — BOM-derived hpp. Saves the cashier from
     // recomputing modal cost manually; the HPP module already did
     // the math from ingredient prices × quantities.
-    const hppCost = Number(product.hpp ?? 0)
+    // `product.hpp` is a FULL BATCH cost; `costPrice` is per base unit. The
+    // server ships `hppPerUnit` precomputed so this cannot be got wrong again.
+    const hppCost = Number(product.hppPerUnit ?? 0)
     if (hppCost > 0 && !form.getValues('costPrice')) {
       form.setValue('costPrice', hppCost, { shouldValidate: true })
     }
