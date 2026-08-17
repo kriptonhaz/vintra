@@ -1,5 +1,50 @@
 # @vintra/db
 
+## 0.3.0
+
+### Minor Changes
+
+- 492be0a: Add a Supabase free-tier usage watch, so the self-hosting decision surfaces on
+  its own instead of depending on someone remembering to open the dashboard.
+
+  `scripts/check-supabase-usage.ts` reports database size, projected 30-day
+  egress, and auth users against the free-tier limits, warning at 70% of each.
+  Run it locally with `bun run check:usage` (`--dry` to report without recording);
+  a daily GitHub Actions workflow runs it too and fails the job when a threshold
+  trips.
+
+  Egress is only obtainable from the Supabase Metrics API — the Management API
+  has no usage endpoint, it is dashboard-only. That metric, `db_transmit_bytes`,
+  is a counter that resets on instance restart, so a single reading is
+  meaningless. The new `ops_usage_snapshots` table (a global ops table, no
+  `tenant_id`) stores the history the rate is derived from, and a counter that
+  goes backwards is treated as a restart rather than reported as negative egress.
+
+  The check also tracks `realtime_postgres_changes_total_subscriptions`, which
+  should stay 0 after the migration 0142 teardown. Anything above 0 means
+  something re-subscribed to `postgres_changes` — the pattern that exhausted
+  JuraganQu's egress — so it is flagged as a regression tripwire.
+
+### Patch Changes
+
+- aaa1c33: Add `bun run check:drift`, which diffs the Drizzle schema against the live
+  database column by column.
+
+  `drizzle-kit generate` has been broken since June 2026 — the meta snapshot
+  history collides at 0004/0005 and is frozen at 19 tables while the schema has
+  127 — so every migration since 0006 has been hand-written and nothing verified
+  that the SQL matched the schema files. This closes that gap, and runs daily in
+  the Database watch workflow.
+
+  It reads the schema through Drizzle's own `getTableConfig`, not by parsing the
+  TypeScript, and reports four categories: tables/columns present in one side but
+  not the other (structural, exits 1) and type differences (advisory, exits 1 only
+  under `--strict`, since a normalisation gap should not masquerade as drift).
+
+  First run is clean: 127 tables and 1377 columns match exactly, types included.
+  That makes a future migration squash safe from a drift standpoint — the check
+  JuraganQu lacked when a legacy `materials.supplier` column broke a dump restore.
+
 ## 0.2.0
 
 ### Minor Changes

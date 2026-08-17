@@ -1,5 +1,14 @@
 # @vintra/web
 
+## 0.3.0
+
+### Patch Changes
+
+- Updated dependencies [aaa1c33]
+- Updated dependencies [492be0a]
+  - @vintra/db@0.3.0
+  - @vintra/shared@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
