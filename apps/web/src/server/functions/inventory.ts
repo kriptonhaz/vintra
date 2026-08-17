@@ -31,6 +31,7 @@ import {
   filterBranchesByAccess,
   branchScopeWhere,
 } from '../lib/branch-scope'
+import { statedUnitCost } from '../lib/stock-cost'
 import {
   uploadInventoryItemPhoto,
   uploadInventoryGalleryPhoto,
@@ -2124,6 +2125,11 @@ export const recordMovement = createServerFn({ method: 'POST' })
     const unitCostInBase =
       data.unitCost != null ? data.unitCost / baseRatio : null
 
+    // The cost we are willing to re-cost the ingredient with — `null` when
+    // this movement states none. A zero must NOT overwrite a real price;
+    // see `statedUnitCost` for why, and what it cost in production.
+    const statedCost = statedUnitCost(unitCostInBase)
+
     // Compute the balance delta. Adjustment is treated as absolute
     // delta (+ for increase, - for decrease) — but since `quantity` is
     // always positive and we don't have a separate sign field, the UI
@@ -2205,26 +2211,29 @@ export const recordMovement = createServerFn({ method: 'POST' })
       // by assertHppUnitMatchesBase on item save).
       if (
         data.movementType === 'in' &&
-        unitCostInBase != null &&
+        statedCost != null &&
         item.linkedHppMaterialId &&
         item.autoSyncHppCost
       ) {
         await tx
           .update(materials)
           .set({
-            pricePerUnit: unitCostInBase.toString(),
+            pricePerUnit: statedCost.toString(),
             updatedAt: performedAt,
           })
           .where(eq(materials.id, item.linkedHppMaterialId))
       }
 
       // Mirror the new cost on the inventory item itself so the next
-      // listing shows fresh stock value (also per-base-unit).
-      if (data.movementType === 'in' && unitCostInBase != null) {
+      // listing shows fresh stock value (also per-base-unit). Same
+      // zero-guard as the uplink above: an opname with no cost stated must
+      // not wipe the item's cost basis and, with it, every margin figure
+      // that reads from it.
+      if (data.movementType === 'in' && statedCost != null) {
         await tx
           .update(inventoryItems)
           .set({
-            costPrice: unitCostInBase.toString(),
+            costPrice: statedCost.toString(),
             updatedAt: performedAt,
           })
           .where(eq(inventoryItems.id, data.itemId))
