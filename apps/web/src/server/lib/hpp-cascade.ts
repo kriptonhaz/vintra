@@ -59,6 +59,12 @@ export interface RecalcResult {
 export async function computeTenantHppWith(
   tenantId: string,
   exec: DbExecutor,
+  /**
+   * Hypothetical prices to substitute for the stored ones, keyed by material
+   * id. Used to answer "what would this price change do?" without writing
+   * anything — the preview a manual edit shows before the owner commits to it.
+   */
+  priceOverrides?: ReadonlyMap<string, number>,
 ): Promise<HppComputeResult> {
   const [productRows, bomRows, materialRows] = await Promise.all([
     exec
@@ -96,7 +102,12 @@ export async function computeTenantHppWith(
       sourceProductId: b.sourceProductId,
       quantity: Number(b.quantity ?? 0),
     })),
-    new Map(materialRows.map((m) => [m.id, Number(m.pricePerUnit ?? 0)])),
+    new Map(
+      materialRows.map((m) => [
+        m.id,
+        priceOverrides?.get(m.id) ?? Number(m.pricePerUnit ?? 0),
+      ]),
+    ),
   )
 }
 
@@ -104,6 +115,56 @@ export async function computeTenantHppWith(
 function sameMoney(a: number | null, b: number): boolean {
   if (a == null) return false
   return Math.round(a * 100) === Math.round(b * 100)
+}
+
+/**
+ * What would happen if this ingredient's price became `newPrice`?
+ *
+ * Read-only: computes the graph twice — once as stored, once with the price
+ * substituted — and diffs them. Nothing is written, so this is safe to call
+ * on every keystroke of a price field if the UI wants to.
+ *
+ * The owner is shown this BEFORE a manual price edit is applied, because a
+ * price change they typed is a decision with consequences they can act on:
+ * which products moved, by how much, and — the part actually worth deciding
+ * about — which ones now sell below a healthy margin.
+ */
+export async function previewMaterialPriceChange(
+  tenantId: string,
+  materialId: string,
+  newPrice: number,
+  exec: DbExecutor = db,
+): Promise<CostChangeImpact & { products: RecalcResult['changed'] }> {
+  const [current, hypothetical] = await Promise.all([
+    computeTenantHppWith(tenantId, exec),
+    computeTenantHppWith(tenantId, exec, new Map([[materialId, newPrice]])),
+  ])
+
+  const changed: RecalcResult['changed'] = []
+  let unchanged = 0
+
+  for (const [productId, after] of hypothetical.values) {
+    const before = current.values.get(productId)
+    if (before && sameMoney(before.hpp, after.hpp)) {
+      unchanged++
+      continue
+    }
+    changed.push({
+      productId,
+      oldHpp: before?.hpp ?? null,
+      newHpp: after.hpp,
+      oldMargin: before?.margin ?? null,
+      newMargin: after.margin,
+    })
+  }
+
+  const result: RecalcResult = {
+    changed,
+    unchanged,
+    unresolved: hypothetical.unresolved,
+    maxDepth: hypothetical.maxDepth,
+  }
+  return { ...summarizeImpact(result), products: changed }
 }
 
 /**

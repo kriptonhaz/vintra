@@ -15,8 +15,13 @@ import {
   deleteSupplier,
   createMaterial,
   updateMaterial,
+  previewMaterialPriceImpact,
   deleteMaterial,
 } from '@/server/functions/hpp'
+import {
+  HppImpactDialog,
+  type HppImpact,
+} from '@/components/modules/hpp/hpp-impact-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -92,6 +97,17 @@ function SuppliersPage() {
   // Material state
   const [addMaterialSupplierId, setAddMaterialSupplierId] = useState<string | null | undefined>(undefined)
   const [editingMaterial, setEditingMaterial] = useState<SupplierMaterial | null>(null)
+  /**
+   * A material save held back until the owner has seen what it would do to
+   * their HPP. Holds the form data so confirming can replay the same save.
+   */
+  const [pendingMaterialSave, setPendingMaterialSave] = useState<{
+    impact: HppImpact
+    oldPrice: number
+    newPrice: number
+    materialName: string
+  } | null>(null)
+  const [pendingFormData, setPendingFormData] = useState<MaterialFormData | null>(null)
   const [deletingMaterialId, setDeletingMaterialId] = useState<string | null>(null)
 
   const [mutationLoading, setMutationLoading] = useState(false)
@@ -200,7 +216,15 @@ function SuppliersPage() {
     }
   }
 
-  async function handleUpdateMaterial(data: MaterialFormData) {
+  /**
+   * `confirmedCascade` is set only by the impact dialog's confirm button, so
+   * the confirmed and unconfirmed paths run the exact same save code and
+   * cannot drift apart.
+   */
+  async function handleUpdateMaterial(
+    data: MaterialFormData,
+    confirmedCascade = false,
+  ) {
     if (!editingMaterial) return
     setMutationLoading(true)
     setError(null)
@@ -225,18 +249,55 @@ function SuppliersPage() {
       if (!unitId) {
         throw new Error(`Satuan "${data.unit}" tidak ditemukan`)
       }
-      await updateMaterial({
-        data: {
-          id: editingMaterial.id,
-          name: data.name,
-          brand: data.brand,
-          unitId,
-          purchasePrice: data.purchasePrice,
-          purchaseQty: data.purchaseQty,
-          supplierId,
-          notes: data.notes,
-        },
-      })
+      const payload = {
+        id: editingMaterial.id,
+        name: data.name,
+        brand: data.brand,
+        unitId,
+        purchasePrice: data.purchasePrice,
+        purchaseQty: data.purchaseQty,
+        supplierId,
+        notes: data.notes,
+      }
+
+      // A price edit cascades into every recipe using this ingredient, so show
+      // what it would do before doing it. Ask only when the price actually
+      // moved AND something is actually affected — an owner fixing a typo in a
+      // name should not be handed a dialog, and neither should one whose price
+      // change touches no recipe.
+      const nextPricePerUnit =
+        Number(data.purchaseQty) > 0
+          ? Number(data.purchasePrice) / Number(data.purchaseQty)
+          : 0
+      const priceMoved =
+        Math.round(nextPricePerUnit * 100) !==
+        Math.round(Number(editingMaterial.pricePerUnit) * 100)
+
+      if (priceMoved && !confirmedCascade) {
+        const impact = await previewMaterialPriceImpact({
+          data: {
+            materialId: editingMaterial.id,
+            newPricePerUnit: nextPricePerUnit,
+          },
+        })
+        if (impact.affected > 0) {
+          // Park the save until the owner has seen the consequences. Confirm
+          // re-enters this same handler with `confirmedCascade` set, so there
+          // is one save path rather than two that can drift apart.
+          setPendingFormData(data)
+          setPendingMaterialSave({
+            impact,
+            oldPrice: Number(editingMaterial.pricePerUnit),
+            newPrice: nextPricePerUnit,
+            materialName: data.name,
+          })
+          setMutationLoading(false)
+          return
+        }
+      }
+
+      await updateMaterial({ data: payload })
+      setPendingMaterialSave(null)
       setEditingMaterial(null)
       invalidateTenantMaterials(queryClient)
       invalidateTenantSuppliers(queryClient)
@@ -493,6 +554,37 @@ function SuppliersPage() {
           />
         )}
       </Sheet>
+
+      <HppImpactDialog
+
+        open={pendingMaterialSave !== null}
+
+        impact={pendingMaterialSave?.impact ?? null}
+
+        materialName={pendingMaterialSave?.materialName ?? ''}
+
+        oldPrice={pendingMaterialSave?.oldPrice ?? 0}
+
+        newPrice={pendingMaterialSave?.newPrice ?? 0}
+
+        loading={mutationLoading}
+
+        onCancel={() => {
+
+          setPendingMaterialSave(null)
+
+          setPendingFormData(null)
+
+        }}
+
+        onConfirm={() => {
+
+          if (pendingFormData) void handleUpdateMaterial(pendingFormData, true)
+
+        }}
+
+      />
+
 
       <ConfirmDialog
         open={deletingSupplierIds !== null}

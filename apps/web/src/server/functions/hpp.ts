@@ -43,6 +43,11 @@ import {
   bomRowUnitPrice,
 } from '@/lib/hpp-calculator'
 import { computeTenantHpp } from '../lib/hpp-engine-load'
+import {
+  recalcTenantHpp,
+  previewMaterialPriceChange,
+  summarizeImpact,
+} from '../lib/hpp-cascade'
 
 // ─── Tenant Categories ───────────────────────────────
 
@@ -294,19 +299,42 @@ export const updateMaterial = createServerFn({ method: 'POST' })
       pricePerUnitUpdate.pricePerUnit = pq > 0 ? (pp / pq).toFixed(2) : '0'
     }
 
-    const [material] = await db
-      .update(materials)
-      .set({
-        ...updates,
-        ...pricePerUnitUpdate,
-        ...(purchasePrice !== undefined ? { purchasePrice } : {}),
-        ...(purchaseQty !== undefined ? { purchaseQty } : {}),
-        ...(supplierId !== undefined ? { supplierId: supplierId || null } : {}),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(materials.id, id), eq(materials.tenantId, tenantId)))
-      .returning()
-    if (!material) throw new Error('Bahan baku tidak ditemukan')
+    // The price write and the cascade it triggers share one transaction, so an
+    // ingredient price can never be committed while the HPP derived from it is
+    // not — that drift is exactly what this mechanism exists to prevent. `tx`
+    // is threaded down for the same reason: reading through the root client
+    // would recompute from the price as it was BEFORE this update.
+    const { material, cascade } = await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(materials)
+        .set({
+          ...updates,
+          ...pricePerUnitUpdate,
+          ...(purchasePrice !== undefined ? { purchasePrice } : {}),
+          ...(purchaseQty !== undefined ? { purchaseQty } : {}),
+          ...(supplierId !== undefined ? { supplierId: supplierId || null } : {}),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(materials.id, id), eq(materials.tenantId, tenantId)))
+        .returning()
+      if (!updated) throw new Error('Bahan baku tidak ditemukan')
+
+      // Only when the price actually moved. Renaming an ingredient or
+      // changing its supplier must not churn every product's `updatedAt` or
+      // write no-op rows into the price history.
+      const priceMoved =
+        Math.round(Number(before.pricePerUnit) * 100) !==
+        Math.round(Number(updated.pricePerUnit) * 100)
+
+      const recalc = priceMoved
+        ? await recalcTenantHpp(tenantId, tx, {
+            reason: 'material_price',
+            materialId: id,
+          })
+        : null
+
+      return { material: updated, cascade: recalc }
+    })
 
     // HPP downlink: if the price actually changed and there are linked
     // inventory items still expecting auto-sync, fire a notification
@@ -359,7 +387,76 @@ export const updateMaterial = createServerFn({ method: 'POST' })
       console.error('[updateMaterial] failed to emit HPP downlink notif', err)
     }
 
-    return material
+    // Return what the cascade did alongside the material, so the form can
+    // report "12 produk ikut diperbarui" instead of leaving the owner to
+    // wonder whether their price edit reached anything.
+    return {
+      ...material,
+      hppCascade: cascade
+        ? { ...summarizeImpact(cascade), products: cascade.changed }
+        : null,
+    }
+  })
+
+/**
+ * What would changing this ingredient's price do to the catalog?
+ *
+ * Read-only — nothing is written. The material edit form calls this before
+ * saving so the owner sees the consequences of the number they typed while
+ * they can still change their mind: how many products move, by how much, and
+ * which ones would end up selling under a healthy margin.
+ *
+ * A manual edit asks; a stock-in does not. The person typing a new ingredient
+ * price is the person who sets menu prices, so the question is answerable.
+ * The crew receiving goods are not, which is why that path cascades silently
+ * and notifies afterwards instead.
+ */
+export const previewMaterialPriceImpact = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      materialId: z.string().uuid(),
+      newPricePerUnit: z.coerce.number().min(0),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { tenantId } = await requireAuth()
+
+    // Tenant-scope the material before letting its id into the computation.
+    const [owned] = await db
+      .select({ id: materials.id })
+      .from(materials)
+      .where(
+        and(eq(materials.id, data.materialId), eq(materials.tenantId, tenantId)),
+      )
+      .limit(1)
+    if (!owned) throw new Error('Bahan baku tidak ditemukan')
+
+    const impact = await previewMaterialPriceChange(
+      tenantId,
+      data.materialId,
+      data.newPricePerUnit,
+    )
+
+    // Attach names so the dialog can list products without a second call.
+    const ids = impact.products.map((p) => p.productId)
+    const names =
+      ids.length > 0
+        ? await db
+            .select({ id: products.id, name: products.name })
+            .from(products)
+            .where(
+              and(eq(products.tenantId, tenantId), inArray(products.id, ids)),
+            )
+        : []
+    const nameById = new Map(names.map((n) => [n.id, n.name]))
+
+    return {
+      ...impact,
+      products: impact.products.map((p) => ({
+        ...p,
+        name: nameById.get(p.productId) ?? '—',
+      })),
+    }
   })
 
 export const deleteMaterial = createServerFn({ method: 'POST' })
