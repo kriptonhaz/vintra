@@ -1,0 +1,60 @@
+name: Supabase usage watch
+
+on:
+  schedule:
+    # 02:00 UTC daily = 09:00 WIB. Daily rather than weekly because the egress
+    # figure is a rate between consecutive snapshots — more samples means a
+    # tighter window and a spike is caught in a day instead of a week.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: supabase-usage
+  cancel-in-progress: false
+
+jobs:
+  usage:
+    name: check free-tier headroom
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+
+      # Fail with an actionable message rather than a cryptic runtime error
+      # when the repo secrets have not been added yet.
+      - name: Verify secrets are configured
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          missing=""
+          [ -z "$DATABASE_URL" ]        && missing="$missing DATABASE_URL"
+          [ -z "$SUPABASE_URL" ]        && missing="$missing SUPABASE_URL"
+          [ -z "$SUPABASE_SECRET_KEY" ] && missing="$missing SUPABASE_SECRET_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repo secrets:$missing"
+            echo "Add them under Settings -> Secrets and variables -> Actions."
+            echo "Values are the ones already in apps/web/.env."
+            exit 1
+          fi
+          echo "All required secrets present."
+
+      # Invoked directly rather than via `bun run check:usage`, because that
+      # script loads apps/web/.env, which does not exist on a runner.
+      # Exits 1 when any metric is at or above 70% of its free-tier limit, so
+      # the job goes red and GitHub emails the failure.
+      - name: Check usage
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: bun scripts/check-supabase-usage.ts
