@@ -89,12 +89,31 @@ import type { UseFormReturn } from 'react-hook-form'
 
 interface CalculateSearchParams {
   editProductId?: string
+  /**
+   * Which step to open on. Honoured only in edit mode, for the same reason
+   * the stepper is only clickable there: a new product has nothing filled in
+   * yet, so landing on step 3 would show empty fields and let the per-step
+   * validation be skipped.
+   *
+   * Deep-linked from the inventory item screen, whose price is owned by this
+   * product — that link points straight at step 3, where the selling price
+   * lives, instead of dropping the owner on step 1 to click through.
+   */
+  step?: number
 }
 
 export const Route = createFileRoute('/_authed/hpp/calculate')({
-  validateSearch: (search: Record<string, unknown>): CalculateSearchParams => ({
-    editProductId: typeof search.editProductId === 'string' ? search.editProductId : undefined,
-  }),
+  validateSearch: (search: Record<string, unknown>): CalculateSearchParams => {
+    const rawStep = Number(search.step)
+    return {
+      editProductId:
+        typeof search.editProductId === 'string' ? search.editProductId : undefined,
+      step:
+        Number.isInteger(rawStep) && rawStep >= 1 && rawStep <= STEPS.length
+          ? rawStep
+          : undefined,
+    }
+  },
   component: CalculatePage,
 })
 
@@ -135,7 +154,15 @@ const MATERIAL_DEFAULTS: CostItemData = {
 
 function CalculatePage() {
   const { t } = useTranslation()
-  const [currentStep, setCurrentStep] = useState(1)
+  // Read before the step state below, which initialises from them.
+  const { editProductId, step: stepFromUrl } = Route.useSearch()
+  const isEditMode = !!editProductId
+
+  // Deep links may open straight on a later step, but only when editing —
+  // see the `step` search param for why.
+  const [currentStep, setCurrentStep] = useState(
+    editProductId && stepFromUrl ? stepFromUrl : 1,
+  )
   const [saving, setSaving] = useState(false)
   const { data: tenantCategoriesRaw = [], refetch: refetchCategories } = useTenantCategories()
   const categories = tenantCategoriesRaw.map((c) => ({ value: c.name, label: c.name }))
@@ -165,8 +192,6 @@ function CalculatePage() {
   const { toast } = useToast()
 
   // Edit mode — fetch existing product data
-  const { editProductId } = Route.useSearch()
-  const isEditMode = !!editProductId
   const [editDataLoaded, setEditDataLoaded] = useState(false)
 
   // Photo (Item 3 UI/UX review). The wizard owns the data URL the

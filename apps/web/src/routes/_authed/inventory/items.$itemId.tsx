@@ -1509,7 +1509,7 @@ function UnitCard({
           </p>
           <Link
             to="/hpp/calculate"
-            search={{ edit: linkedHppProductId, step: 3 } as never}
+            search={{ editProductId: linkedHppProductId, step: 3 }}
             className="mt-1 inline-flex items-center gap-1 font-medium text-brand-600 hover:underline dark:text-brand-400"
           >
             Ubah harga jual di HPP →
