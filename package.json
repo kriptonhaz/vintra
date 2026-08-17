@@ -22,6 +22,7 @@
     "db:migrate:baseline": "bun run --filter @vintra/db migrate:baseline",
     "db:studio": "bun run --filter @vintra/db studio",
     "check:usage": "dotenv -e apps/web/.env -- bun scripts/check-supabase-usage.ts",
+    "check:drift": "dotenv -e apps/web/.env -- bun scripts/schema-drift.ts",
     "changeset": "bunx changeset",
     "changeset:version": "bunx changeset version",
     "changeset:tag": "bunx changeset tag",

@@ -1,4 +1,4 @@
-name: Supabase usage watch
+name: Database watch
 
 on:
   schedule:
@@ -58,3 +58,12 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: bun scripts/check-supabase-usage.ts
+
+      # `drizzle-kit generate` is broken, so migrations are hand-written and
+      # nothing verifies they match the schema files. This does. `if: always()`
+      # so a usage warning above does not mask a drift regression here.
+      - name: Check schema drift
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: bun scripts/schema-drift.ts
