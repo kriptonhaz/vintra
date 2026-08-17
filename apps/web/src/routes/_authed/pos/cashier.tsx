@@ -41,7 +41,10 @@ import { formatRupiah } from '@/lib/currency'
 import { safeLocalStorage, safeSessionStorage } from '@/lib/safe-storage'
 import { useCurrentUser } from '@/hooks/use-permissions'
 import { useBranch } from '@/hooks/use-branch'
-import type { POSPaymentMethod } from '@vintra/shared'
+import {
+  POS_PRICE_CHANGED_ERROR_PREFIX,
+  type POSPaymentMethod,
+} from '@vintra/shared'
 
 export const Route = createFileRoute('/_authed/pos/cashier')({
   component: CashierPage,
@@ -332,6 +335,58 @@ function CashierPage() {
     await queryClient.invalidateQueries({ queryKey: ['pos'] })
   }
 
+  /**
+   * Re-price every cart line from the current price list.
+   *
+   * Runs when the server refuses a sale because a price moved under the open
+   * cart. Rewriting the lines in place — rather than clearing the cart or
+   * reloading the page — is what lets the cashier see exactly which figure
+   * changed while everything already rung up survives.
+   */
+  async function refreshCartPrices() {
+    const itemIds = Array.from(
+      new Set(lines.filter((l) => !l.isAdhoc && l.itemId).map((l) => l.itemId!)),
+    )
+    if (itemIds.length === 0 || !branchId) return
+
+    // `itemIds` is capped at 50 server-side. Chunk rather than truncate:
+    // dropping the tail would leave exactly the stale prices this is meant to
+    // fix, and the cashier would loop on the same refusal.
+    const byId = new Map<string, POSProduct>()
+    try {
+      for (let i = 0; i < itemIds.length; i += 50) {
+        const res = await listPOSProducts({
+          data: { branchId, itemIds: itemIds.slice(i, i + 50) },
+        })
+        for (const p of (res.items ?? []) as POSProduct[]) byId.set(p.id, p)
+      }
+    } catch {
+      // Leave the cart alone. Prices stay as they were, the server keeps
+      // refusing, and the cashier can retry — better than half-updating.
+      return
+    }
+
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l.isAdhoc || !l.itemId) return l
+        const unit = byId.get(l.itemId)?.units.find((u) => u.unitId === l.unitId)
+        if (!unit) return l
+        const matched = retier(unit.tiers, l.qty)
+        if (!matched) return l
+        return {
+          ...l,
+          tiers: unit.tiers,
+          unitPrice: matched.unitPrice,
+          isBulk: matched.minQty > 1,
+        }
+      }),
+    )
+
+    // The grid tiles show prices too — leaving them stale would have the cart
+    // and the tile disagree about the same item.
+    void queryClient.invalidateQueries({ queryKey: ['pos', 'products'] })
+  }
+
   const create = useMutation({
     mutationFn: (input: {
       method: POSPaymentMethod
@@ -440,6 +495,20 @@ function CashierPage() {
       }
     },
     onError: (err: Error) => {
+      // The price list moved while this cart was open. The server refused
+      // rather than ringing up a figure the cashier never quoted; pull the
+      // new prices into the cart so the next Bayar press is a deliberate
+      // confirmation of what is now on screen.
+      if (err.message.startsWith(POS_PRICE_CHANGED_ERROR_PREFIX)) {
+        toast({
+          title: 'Harga berubah',
+          description: err.message,
+          variant: 'error',
+        })
+        void refreshCartPrices()
+        return
+      }
+
       // JUR-141: server rejects cash sales when cash drawer is on +
       // no session is open. Match the literal Indonesian error
       // string from pos-cash.ts and bounce the cashier into the

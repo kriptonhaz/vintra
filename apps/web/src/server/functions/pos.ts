@@ -39,6 +39,7 @@ import { cashStaleConfigSchema } from '../../lib/schemas/cash-stale'
 import { and, eq, sql, desc, gte, lte, ilike, isNotNull, isNull, inArray } from 'drizzle-orm'
 import {
   posTierLimits,
+  POS_PRICE_CHANGED_ERROR_PREFIX,
   type POSFeatureFlag,
   type POSPaymentMethod,
   type POSTierKey,
@@ -1413,6 +1414,12 @@ export const createSale = createServerFn({ method: 'POST' })
       return { type: input.type, value: input.value, amount }
     }
     const prepared: PreparedLine[] = []
+    /**
+     * Lines the cashier priced differently from what the server just
+     * resolved — see the guard below for why this blocks the sale rather
+     * than silently repricing it.
+     */
+    const priceChanges: Array<{ name: string; quoted: number; current: number }> = []
     let subtotal = 0
     for (const line of data.lines) {
       if (line.isAdhoc || !line.itemId) {
@@ -1517,6 +1524,27 @@ export const createSale = createServerFn({ method: 'POST' })
         const tierPrice = matchedTier.unitPrice
         const isBulk = matchedTier.minQty > 1
 
+        // Did the price move under the cashier's feet?
+        //
+        // `line.unitPrice` is what the cart displayed when the item was rung
+        // up; `tierPrice` is what the price list says right now. The server
+        // has always used its own figure and ignored the client's — correct
+        // for tamper-resistance, but it means a price edited mid-shift
+        // silently reprices an open cart at payment time. The cashier has
+        // already said "tujuh belas ribu" out loud and the receipt then
+        // prints something else.
+        //
+        // Collect the divergences and refuse below rather than repricing
+        // silently. Ad-hoc lines never reach here: their price IS the
+        // cashier's own figure, so there is nothing to disagree with.
+        if (Math.abs(line.unitPrice - tierPrice) >= 0.01) {
+          priceChanges.push({
+            name: item.name,
+            quoted: line.unitPrice,
+            current: tierPrice,
+          })
+        }
+
         // HPP snapshot: prefer the linked HPP product's hpp; else item
         // costPrice (per base unit). Stored per BASE unit so the cost
         // ledger stays apples-to-apples across alt-unit sales.
@@ -1569,6 +1597,28 @@ export const createSale = createServerFn({ method: 'POST' })
         subtotal += sub
         }
       }
+    }
+
+    // Price guard: never ring a sale at a price the cashier didn't see.
+    //
+    // Refusing costs one extra tap; ringing it up silently costs the cashier
+    // an argument at the counter and leaves a receipt that contradicts what
+    // the customer was told. The cashier re-prices its lines, sees the new
+    // figure, and confirms — at which point quoted and current agree and this
+    // check passes.
+    //
+    // Deliberately BEFORE the stock guard and every write: nothing has been
+    // touched yet, so there is nothing to unwind.
+    if (priceChanges.length > 0) {
+      const detail = priceChanges
+        .map(
+          (c) =>
+            `${c.name} Rp ${c.quoted.toLocaleString('id-ID')} → Rp ${c.current.toLocaleString('id-ID')}`,
+        )
+        .join(', ')
+      throw new Error(
+        `${POS_PRICE_CHANGED_ERROR_PREFIX} ${detail}. Keranjang sudah diperbarui — periksa lalu tekan Bayar lagi kalau harga barunya sudah benar.`,
+      )
     }
 
     // Stock guard: refuse if any non-adhoc line — or the cumulative

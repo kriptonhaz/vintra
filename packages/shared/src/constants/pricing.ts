@@ -991,3 +991,19 @@ export const WA_ANNUAL_DISCOUNT_PCT = 10
 export function waAnnualPrice(monthlyIdr: number): number {
   return Math.round(monthlyIdr * 12 * (1 - WA_ANNUAL_DISCOUNT_PCT / 100))
 }
+
+/**
+ * Opening words of the error `createSale` throws when the price list moved
+ * after an item was added to the cart.
+ *
+ * Shared so the cashier UI can recognise its own server's refusal and react
+ * (re-price the cart in place, let the cashier confirm) instead of just
+ * printing it. It is a prefix rather than the whole message because the
+ * message names the affected items and their old and new prices, which the
+ * cashier needs to read verbatim.
+ *
+ * Both sides import this constant: the two are only allowed to drift apart
+ * deliberately, not by someone rewording the sentence.
+ */
+export const POS_PRICE_CHANGED_ERROR_PREFIX =
+  'Harga berubah sejak item masuk keranjang:'
