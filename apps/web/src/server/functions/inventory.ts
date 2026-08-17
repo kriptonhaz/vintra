@@ -31,7 +31,15 @@ import {
   filterBranchesByAccess,
   branchScopeWhere,
 } from '../lib/branch-scope'
+import { createNotification } from '../notifications'
+import { NOTIFICATION_TYPES } from '@vintra/shared'
 import { statedUnitCost } from '../lib/stock-cost'
+import {
+  recalcTenantHpp,
+  summarizeImpact,
+  DANGER_MARGIN,
+  type RecalcResult,
+} from '../lib/hpp-cascade'
 import {
   uploadInventoryItemPhoto,
   uploadInventoryGalleryPhoto,
@@ -2145,6 +2153,16 @@ export const recordMovement = createServerFn({ method: 'POST' })
           : qtyInBase // adjustment: treat as absolute increase for MVP
 
     const performedAt = new Date()
+    /**
+     * Filled in by the HPP cascade below when this movement moved an
+     * ingredient price. Declared out here so the notification is sent AFTER
+     * the transaction commits — telling the owner "17 products repriced" and
+     * then rolling back would be worse than telling them nothing.
+     */
+    // A ref rather than a plain `let`: TypeScript's control-flow analysis
+    // does not see assignments made inside the transaction callback and would
+    // narrow a `let` to `null` at the read below.
+    const hppCascade: { value: RecalcResult | null } = { value: null }
     const result = await db.transaction(async (tx) => {
       const [movement] = await tx
         .insert(inventoryMovements)
@@ -2215,6 +2233,20 @@ export const recordMovement = createServerFn({ method: 'POST' })
         item.linkedHppMaterialId &&
         item.autoSyncHppCost
       ) {
+        // Read the price we are about to overwrite, so the cascade below runs
+        // only when it actually moved. Receiving the same ingredient at the
+        // same cost is the common case and must not churn every product's
+        // `updatedAt` or add no-op rows to the price history.
+        const [priorMaterial] = await tx
+          .select({ pricePerUnit: materials.pricePerUnit })
+          .from(materials)
+          .where(eq(materials.id, item.linkedHppMaterialId))
+          .limit(1)
+        const priceMoved =
+          priorMaterial != null &&
+          Math.round(Number(priorMaterial.pricePerUnit) * 100) !==
+            Math.round(statedCost * 100)
+
         await tx
           .update(materials)
           .set({
@@ -2222,6 +2254,31 @@ export const recordMovement = createServerFn({ method: 'POST' })
             updatedAt: performedAt,
           })
           .where(eq(materials.id, item.linkedHppMaterialId))
+
+        // Cascade the new ingredient cost through every recipe using it.
+        //
+        // Without this, `products.hpp` keeps whatever it was computed from
+        // and quietly disagrees with the price it is supposedly derived
+        // from — the owner then prices a menu against a cost that no longer
+        // exists.
+        //
+        // SILENTLY, unlike a manual price edit, which asks first. The crew
+        // receiving goods are not the people who set menu prices; stopping
+        // them with a "17 products affected, 3 below 20% margin" dialog
+        // would ask a question they cannot answer, in the middle of a task
+        // that has nothing to do with pricing. The owner is told afterwards
+        // via the notification below.
+        //
+        // Passing `tx` is required, not incidental: the price update above
+        // is not committed yet, so a cascade reading through the root
+        // client would recompute from the OLD price and write a
+        // confidently wrong number.
+        if (priceMoved) {
+          hppCascade.value = await recalcTenantHpp(auth.tenantId, tx, {
+            reason: 'stock_in',
+            materialId: item.linkedHppMaterialId,
+          })
+        }
       }
 
       // Mirror the new cost on the inventory item itself so the next
@@ -2241,6 +2298,41 @@ export const recordMovement = createServerFn({ method: 'POST' })
 
       return movement
     })
+
+    // Tell the owner what the stock-in did to their costs.
+    //
+    // Deliberately AFTER the transaction: announcing "17 products repriced"
+    // and then rolling back would be worse than announcing nothing. And
+    // deliberately non-fatal — the movement and the cascade are already
+    // committed, so a failed notification must not surface as a failed
+    // stock-in.
+    if (hppCascade.value && hppCascade.value.changed.length > 0) {
+      const impact = summarizeImpact(hppCascade.value)
+      const direction = impact.averageMove >= 0 ? 'naik' : 'turun'
+      const danger = impact.belowDanger.length
+      try {
+        await createNotification({
+          userId: auth.userId,
+          tenantId: auth.tenantId,
+          type: NOTIFICATION_TYPES.hppCascaded,
+          title: 'HPP diperbarui otomatis',
+          body:
+            `Stok masuk mengubah harga bahan, ${impact.affected} produk ikut ${direction} ` +
+            `rata-rata Rp ${Math.abs(Math.round(impact.averageMove)).toLocaleString('id-ID')}.` +
+            (danger > 0
+              ? ` ${danger} produk sekarang marginnya di bawah ${DANGER_MARGIN}% — periksa harga jualnya.`
+              : ''),
+          url: '/hpp',
+          data: {
+            affected: impact.affected,
+            averageMove: impact.averageMove,
+            belowDanger: danger,
+          },
+        })
+      } catch (notifyErr) {
+        console.error('HPP cascade notification failed:', notifyErr)
+      }
+    }
 
     return result
   })

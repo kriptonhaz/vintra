@@ -1009,6 +1009,13 @@
       "when": 1787400000000,
       "tag": "0143_ops_usage_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1787486400000,
+      "tag": "0144_hpp_price_history",
+      "breakpoints": true
     }
   ]
 }

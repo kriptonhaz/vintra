@@ -174,3 +174,53 @@ export const overheadCosts = pgTable('overhead_costs', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
+
+/**
+ * Append-only ledger of every AUTOMATIC HPP movement.
+ *
+ * When an ingredient price or a recipe changes, every affected product is
+ * recalculated. Without a record of that, "kenapa HPP naik bulan ini?" has no
+ * answer — the old number is simply gone, and the owner is left comparing a
+ * menu price against a cost whose history nobody kept.
+ *
+ * One row per product whose HPP actually moved, carrying what triggered it
+ * and, where there is one, which material. Rows are never updated or deleted;
+ * a correction is a new row.
+ */
+export const hppPriceHistory = pgTable(
+  'hpp_price_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id)
+      .notNull(),
+    productId: uuid('product_id')
+      .references(() => products.id, { onDelete: 'cascade' })
+      .notNull(),
+    /** Batch cost before and after, same precision as `products.hpp`. */
+    oldHpp: numeric('old_hpp', { precision: 15, scale: 2 }),
+    newHpp: numeric('new_hpp', { precision: 15, scale: 2 }).notNull(),
+    /**
+     * Why it moved: 'material_price' | 'stock_in' | 'recipe' | 'manual'.
+     * Text rather than an enum so a new trigger does not need a migration
+     * before it can be recorded.
+     */
+    reason: text('reason').notNull(),
+    /** The ingredient whose price triggered this, when there was one. */
+    triggeredByMaterialId: uuid('triggered_by_material_id').references(
+      () => materials.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    tenantCreatedIdx: index('hpp_price_history_tenant_created_idx').on(
+      t.tenantId,
+      t.createdAt,
+    ),
+    productCreatedIdx: index('hpp_price_history_product_created_idx').on(
+      t.productId,
+      t.createdAt,
+    ),
+  }),
+)

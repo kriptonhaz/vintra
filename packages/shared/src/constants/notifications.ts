@@ -39,6 +39,18 @@ export const NOTIFICATION_TYPES = {
    */
   inventoryHppCostChanged: 'inventory_hpp_cost_changed',
 
+  /**
+   * Fires after a stock-in silently repriced one or more HPP products,
+   * because receiving goods changed a linked ingredient's cost.
+   *
+   * The cascade itself is deliberately silent — the crew receiving goods are
+   * not the people who set menu prices, and a confirmation dialog there asks
+   * a question they cannot answer. This is how the owner finds out, after
+   * the fact, with the count of products affected and how many fell below a
+   * healthy margin.
+   */
+  hppCascaded: 'hpp_cascaded',
+
   // POS module
   posTrialGranted: 'pos_trial_granted',
   posTrialExpiringSoon: 'pos_trial_expiring',
