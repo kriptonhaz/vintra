@@ -57,3 +57,10 @@ jobs:
       - name: Typecheck web
         working-directory: apps/web
         run: bun run typecheck
+
+      # `if: always()` so a type error does not hide a failing test — both
+      # results are useful on the same run.
+      - name: Test web
+        if: always()
+        working-directory: apps/web
+        run: bun test
