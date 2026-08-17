@@ -1073,20 +1073,44 @@ export const recalculateAllHpp = createServerFn({ method: 'POST' }).handler(
   async () => {
     const { tenantId } = await requireAuth()
 
-    const allProducts = await db
-      .select({ id: products.id })
-      .from(products)
-      .where(eq(products.tenantId, tenantId))
+    // Build the graph ONCE for the whole tenant.
+    //
+    // This used to loop over products calling `calculateProductHpp`, which was
+    // acceptable when that function ran a single BOM query — but it now builds
+    // the full tenant graph, so the loop would rebuild it once per product:
+    // three queries and a full traversal each. At 124 products that is ~372
+    // round trips against the connection pooler, comfortably into
+    // server-function timeout territory, and it grows with the catalog.
+    //
+    // Computing once and writing the results is also simply what the engine is
+    // for: every product is costed in one topologically-ordered pass.
+    const graph = await computeTenantHpp(tenantId)
 
-    const results = []
-    for (const product of allProducts) {
-      const result = await calculateProductHpp({
-        data: { productId: product.id },
+    const results: Array<{ productId: string; hpp: number; margin: number }> = []
+    for (const [productId, computed] of graph.values) {
+      await db
+        .update(products)
+        .set({
+          hpp: computed.hpp.toFixed(2),
+          margin: computed.margin.toFixed(2),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)))
+      results.push({
+        productId,
+        hpp: computed.hpp,
+        margin: computed.margin,
       })
-      results.push(result)
     }
 
-    return results
+    // Products inside a recipe cycle are left exactly as they were — a stale
+    // number is recoverable, a wrong one silently prices a menu. They are
+    // reported so the caller can surface which recipes need untangling.
+    return {
+      updated: results,
+      unresolved: graph.unresolved,
+      maxDepth: graph.maxDepth,
+    }
   },
 )
 

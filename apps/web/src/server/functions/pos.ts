@@ -45,6 +45,7 @@ import {
   type POSTierKey,
 } from '@vintra/shared'
 import { requirePOSAccess } from '../middleware/module-access'
+import { isPriceChanged } from '../lib/pos-price-guard'
 import {
   writePosSaleCashflowEntry,
   removePosSaleCashflowEntry,
@@ -969,6 +970,19 @@ const saleLineInput = z.object({
    * This guarantees tier integrity even if the client clock-drifts.
    */
   unitPrice: z.coerce.number().min(0),
+  /**
+   * `minQty` of the pricing tier this line was quoted from, when the client
+   * knows it. Opts the line into the price-changed guard below.
+   *
+   * It is OPTIONAL on purpose. The mobile cart stores no tiers at all, so it
+   * cannot re-price a line when the quantity crosses a bulk threshold — its
+   * `unitPrice` stays frozen at the tier that applied when the line was
+   * created. Comparing that against the tier the server resolves would refuse
+   * every mobile bulk sale, which is a far worse failure than the one the
+   * guard prevents. Absent this field the server behaves exactly as it always
+   * has: it resolves the price itself and ignores what the client sent.
+   */
+  quotedTierMinQty: z.coerce.number().optional(),
   isAdhoc: z.boolean().optional().default(false),
   /**
    * Per-line discount (JUR-7). Optional. Server validates the
@@ -1534,10 +1548,19 @@ export const createSale = createServerFn({ method: 'POST' })
         // already said "tujuh belas ribu" out loud and the receipt then
         // prints something else.
         //
-        // Collect the divergences and refuse below rather than repricing
-        // silently. Ad-hoc lines never reach here: their price IS the
-        // cashier's own figure, so there is nothing to disagree with.
-        if (Math.abs(line.unitPrice - tierPrice) >= 0.01) {
+        // ONLY compare when the client told us which tier it quoted, AND the
+        // server landed on that same tier. Otherwise a difference means the
+        // client picked a different tier than the server did — which is
+        // exactly what the mobile cart does, since it holds no tiers and
+        // cannot re-price a line when the quantity crosses a bulk threshold.
+        // Refusing there would block every mobile bulk sale: a much worse
+        // failure than the one this guard prevents. Same tier + different
+        // price is the only case that unambiguously means "the price list was
+        // edited", so it is the only case we refuse.
+        //
+        // Ad-hoc lines never reach here: their price IS the cashier's own
+        // figure, so there is nothing to disagree with.
+        if (isPriceChanged(line, matchedTier)) {
           priceChanges.push({
             name: item.name,
             quoted: line.unitPrice,

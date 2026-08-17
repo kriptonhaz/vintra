@@ -404,6 +404,13 @@ function CashierPage() {
             name: l.name,
             qty: l.qty,
             unitPrice: l.unitPrice,
+            // Which tier this line was quoted from. Opts the line into the
+            // server's price-changed guard: it refuses only when the server
+            // lands on this same tier at a different price, i.e. the price
+            // list was edited while the cart was open. This cart re-tiers on
+            // every qty change, so the tier it names is always the one its
+            // displayed price came from.
+            quotedTierMinQty: retier(l.tiers ?? [], l.qty)?.minQty,
             isAdhoc: l.isAdhoc,
             // JUR-7: per-line discount. Null when not set; server
             // ignores zero-value entries either way.
