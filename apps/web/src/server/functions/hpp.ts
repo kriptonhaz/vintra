@@ -40,6 +40,7 @@ import {
   calculateMaterialCost,
   calculateMargin,
   perUnitHpp,
+  bomRowUnitPrice,
 } from '@/lib/hpp-calculator'
 
 // ─── Tenant Categories ───────────────────────────────
@@ -934,17 +935,41 @@ export const calculateProductHpp = createServerFn()
 
     if (!product) throw new Error('Produk tidak ditemukan')
 
-    // Get product materials with prices
+    // Get the BOM with prices.
+    //
+    // A BOM row is EITHER material-sourced or sub-product-sourced (the DB
+    // CHECK enforces `materialId XOR sourceProductId`). This used to
+    // `INNER JOIN materials`, which silently dropped every sub-product row
+    // — so a product built from another product was costed as if its
+    // sub-recipes were free, understating HPP and overstating margin.
+    // `getProductForEdit` had the identical bug and was fixed; this one was
+    // missed, which is why the calculator UI and the stored `products.hpp`
+    // could disagree on the same recipe.
+    //
+    // Sub-product pricing follows the convention already used by
+    // `getProductForEdit` and the calculator: the per-unit price of a
+    // sub-product is `sourceHpp / sourceProductionQty`, i.e. its batch cost
+    // divided by what one batch yields.
     const recipeUnit = alias(masterHppUnits, 'recipe_unit')
+    const sourceProduct = alias(products, 'source_product')
     const bom = await db
       .select({
         quantity: productMaterials.quantity,
+        unit: recipeUnit.value,
+        materialId: productMaterials.materialId,
         pricePerUnit: materials.pricePerUnit,
         materialName: materials.name,
-        unit: recipeUnit.value,
+        sourceProductId: productMaterials.sourceProductId,
+        sourceName: sourceProduct.name,
+        sourceHpp: sourceProduct.hpp,
+        sourceProductionQty: sourceProduct.productionQty,
       })
       .from(productMaterials)
-      .innerJoin(materials, eq(productMaterials.materialId, materials.id))
+      .leftJoin(materials, eq(productMaterials.materialId, materials.id))
+      .leftJoin(
+        sourceProduct,
+        eq(productMaterials.sourceProductId, sourceProduct.id),
+      )
       .innerJoin(recipeUnit, eq(recipeUnit.id, productMaterials.unitId))
       .where(
         and(
@@ -953,10 +978,24 @@ export const calculateProductHpp = createServerFn()
         ),
       )
 
-    // Calculate material cost (= HPP)
-    const totalMaterialCost = bom.reduce((sum, item) => {
-      return sum + calculateMaterialCost(Number(item.pricePerUnit), Number(item.quantity))
-    }, 0)
+    /** Per-unit price for a BOM row — see `bomRowUnitPrice` for the rules. */
+    const rowUnitPrice = (row: (typeof bom)[number]): number =>
+      bomRowUnitPrice(
+        row.materialId
+          ? { kind: 'material', pricePerUnit: row.pricePerUnit }
+          : {
+              kind: 'sub-product',
+              sourceHpp: row.sourceHpp,
+              sourceProductionQty: row.sourceProductionQty,
+            },
+      )
+
+    // Calculate total cost (= HPP for one batch)
+    const totalMaterialCost = bom.reduce(
+      (sum, item) =>
+        sum + calculateMaterialCost(rowUnitPrice(item), Number(item.quantity)),
+      0,
+    )
 
     // `hpp` is the total cost for one batch (productionQty units).
     // Margin is per-unit: compare the per-unit cost to the per-unit
@@ -985,15 +1024,15 @@ export const calculateProductHpp = createServerFn()
       hpp,
       sellingPrice,
       margin,
+      // Sub-product rows report the sub-product's name and its derived
+      // per-unit cost, so the breakdown adds up to `totalMaterialCost`
+      // instead of showing a gap where the nested recipe was.
       materialDetails: bom.map((item) => ({
-        materialName: item.materialName,
+        materialName: item.materialId ? item.materialName : item.sourceName,
         quantity: Number(item.quantity),
         unit: item.unit,
-        pricePerUnit: Number(item.pricePerUnit),
-        totalCost: calculateMaterialCost(
-          Number(item.pricePerUnit),
-          Number(item.quantity),
-        ),
+        pricePerUnit: rowUnitPrice(item),
+        totalCost: calculateMaterialCost(rowUnitPrice(item), Number(item.quantity)),
       })),
     }
   })
