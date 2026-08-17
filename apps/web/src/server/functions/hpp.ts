@@ -42,6 +42,7 @@ import {
   perUnitHpp,
   bomRowUnitPrice,
 } from '@/lib/hpp-calculator'
+import { computeTenantHpp } from '../lib/hpp-engine-load'
 
 // ─── Tenant Categories ───────────────────────────────
 
@@ -990,22 +991,53 @@ export const calculateProductHpp = createServerFn()
             },
       )
 
-    // Calculate total cost (= HPP for one batch)
-    const totalMaterialCost = bom.reduce(
-      (sum, item) =>
-        sum + calculateMaterialCost(rowUnitPrice(item), Number(item.quantity)),
-      0,
-    )
+    // Authoritative cost comes from the engine, not from summing this
+    // product's rows here.
+    //
+    // Summing locally has to price a sub-recipe row from the sub-product's
+    // STORED hpp, which may itself be stale — a parent then inherits a number
+    // nobody recomputed. The engine rebuilds the whole tenant graph from live
+    // material prices in topological order, so a parent is only costed once
+    // every sub-recipe under it is final. It also refuses to guess inside a
+    // recipe cycle, which local summing cannot detect at all.
+    const graph = await computeTenantHpp(tenantId)
+    const computed = graph.values.get(data.productId)
 
-    // `hpp` is the total cost for one batch (productionQty units).
-    // Margin is per-unit: compare the per-unit cost to the per-unit
-    // selling price, otherwise a multi-yield recipe reads as a loss.
-    const hpp = totalMaterialCost
+    if (!computed) {
+      // Only reachable when this product sits in (or depends on) a cycle.
+      // Leave the stored value alone: stale is recoverable, wrong prices a
+      // menu.
+      throw new Error(
+        'Resep ini saling mereferensi satu sama lain (sub-resep melingkar), jadi HPP-nya tidak bisa dihitung. Periksa komposisi sub-produknya.',
+      )
+    }
+
+    const hpp = computed.hpp
+    const margin = computed.margin
     const sellingPrice = Number(product.sellingPrice)
-    const margin = calculateMargin(
-      sellingPrice,
-      perUnitHpp(hpp, Number(product.productionQty)),
-    )
+
+    // Per-row breakdown for the UI. Sub-product rows are priced from the
+    // engine's freshly computed value where available, falling back to the
+    // stored one, so the breakdown adds up to the same total the engine
+    // reported rather than drifting from it.
+    const rowsWithCost = bom.map((item) => {
+      const subComputed = item.sourceProductId
+        ? graph.values.get(item.sourceProductId)
+        : undefined
+      const unitPrice = subComputed
+        ? bomRowUnitPrice({
+            kind: 'sub-product',
+            sourceHpp: subComputed.hpp,
+            sourceProductionQty: item.sourceProductionQty,
+          })
+        : rowUnitPrice(item)
+      return {
+        item,
+        unitPrice,
+        totalCost: calculateMaterialCost(unitPrice, Number(item.quantity)),
+      }
+    })
+    const totalMaterialCost = hpp
 
     // Update product with calculated HPP and margin
     await db
@@ -1024,15 +1056,15 @@ export const calculateProductHpp = createServerFn()
       hpp,
       sellingPrice,
       margin,
-      // Sub-product rows report the sub-product's name and its derived
-      // per-unit cost, so the breakdown adds up to `totalMaterialCost`
-      // instead of showing a gap where the nested recipe was.
-      materialDetails: bom.map((item) => ({
+      // Sub-product rows report the sub-product's name and its engine-derived
+      // per-unit cost, so the breakdown adds up to the same total the engine
+      // reported instead of showing a gap where the nested recipe was.
+      materialDetails: rowsWithCost.map(({ item, unitPrice, totalCost }) => ({
         materialName: item.materialId ? item.materialName : item.sourceName,
         quantity: Number(item.quantity),
         unit: item.unit,
-        pricePerUnit: rowUnitPrice(item),
-        totalCost: calculateMaterialCost(rowUnitPrice(item), Number(item.quantity)),
+        pricePerUnit: unitPrice,
+        totalCost,
       })),
     }
   })
