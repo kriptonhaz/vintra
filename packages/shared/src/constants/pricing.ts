@@ -416,6 +416,8 @@ export type POSFeatureFlag =
   // the Situs sidebar entry, can't claim a public slug, and a tenant
   // who downgrades has their public URL go dark (404).
   | 'tenant_site'
+  /** Vintra AI — business Q&A over the tenant's own reports (Komplit). */
+  | 'business_ai'
   // JUR-12 — Toko + Komplit: Web Bluetooth thermal printer (58mm/80mm,
   // ESC/POS over BLE GATT). Free tier keeps the PDF receipt path so
   // owners still have a print option without paying — the BT driver
@@ -552,6 +554,10 @@ const POS_MULTI_OUTLET_FEATURES: ReadonlyArray<POSFeatureFlag> = [
  */
 const POS_KOMPLIT_FEATURES: ReadonlyArray<POSFeatureFlag> = [
   ...POS_BISNIS_FEATURES,
+  // Vintra AI (business Q&A over the tenant's own reports). Bundled into
+  // Komplit rather than given a tier of its own — Vintra sells one package,
+  // and stacking a price level above it would work against that.
+  'business_ai',
   'loyalty_points',
   // Tenant promotions (JUR-9) — codes + product auto-apply + cart
   // auto-apply, all in one schema. Komplit-exclusive headline along

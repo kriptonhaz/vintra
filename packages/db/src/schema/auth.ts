@@ -77,5 +77,11 @@ export const tenantMembers = pgTable('tenant_members', {
    * collides between tenants.
    */
   waLoginEmail: text('wa_login_email').unique(),
+  /**
+   * Whether this member may use Vintra AI. Off by default: the assistant
+   * reads sales, cashflow and margin figures, which an owner may not want
+   * every cashier seeing. Owners bypass this flag entirely.
+   */
+  aiEnabled: boolean('ai_enabled').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })

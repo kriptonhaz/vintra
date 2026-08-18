@@ -132,6 +132,7 @@ export const getCurrentUser = createServerFn().handler(async () => {
       tenantId: tenantMembers.tenantId,
       role: tenantMembers.role,
       roleId: tenantMembers.roleId,
+      aiEnabled: tenantMembers.aiEnabled,
     })
     .from(tenantMembers)
     .where(eq(tenantMembers.userId, user.id))
@@ -509,6 +510,15 @@ export const getCurrentUser = createServerFn().handler(async () => {
     authProviders,
     impersonating,
     impersonatedTenantName,
+    // Vintra AI per-member toggle. Owners and impersonating platform admins
+    // always pass; everyone else needs the owner to switch it on. The client
+    // combines this with pos.features.includes('business_ai') — this flag
+    // answers "may this person", the tier answers "does this business have
+    // it at all".
+    businessAiEnabled:
+      (resolvedRoleKey ?? membership[0]?.role ?? 'owner') === 'owner' ||
+      impersonating ||
+      (membership[0]?.aiEnabled ?? false),
   }
 })
 

@@ -5,8 +5,9 @@ import {
   inventorySettings,
   posSettings,
   waSettings,
+  tenantMembers,
 } from '@vintra/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { InventoryTierKey, POSTierKey } from '@vintra/shared'
 import { posTierLimits } from '@vintra/shared'
 import { requireAuth, requirePermission, type AuthContext } from './auth'
@@ -327,4 +328,42 @@ export async function requireWAManageAccess(): Promise<WAAccessContext> {
   const auth = await requirePermission('whatsapp.manage')
   const waTier = await resolveWATier(auth.tenantId)
   return { ...auth, waTier }
+}
+
+/**
+ * Gate for Vintra AI.
+ *
+ * Bundled into the existing `komplit` tier rather than given a tier of its
+ * own: Vintra sells a single Rp 149.000 package, so stacking another price
+ * level above it would work against that — and no tenant is paying for the
+ * first level yet.
+ *
+ * Two gates, not one. The tier decides whether the business has the feature;
+ * `tenant_members.ai_enabled` decides which staff may use it, because the
+ * assistant can read sales, cashflow and margins — figures an owner may not
+ * want every cashier seeing. Owners always pass.
+ */
+export async function requireBusinessAiAccess(): Promise<POSAccessContext> {
+  const auth = await requirePOSAccess()
+  if (!posTierLimits(auth.posTier).features.includes('business_ai')) {
+    throw new Error(
+      'Vintra AI hanya tersedia di paket Komplit. Upgrade untuk mengaktifkan.',
+    )
+  }
+  if (auth.roleKey !== 'owner') {
+    const [member] = await db
+      .select({ aiEnabled: tenantMembers.aiEnabled })
+      .from(tenantMembers)
+      .where(
+        and(
+          eq(tenantMembers.tenantId, auth.tenantId),
+          eq(tenantMembers.userId, auth.userId),
+        ),
+      )
+      .limit(1)
+    if (!member?.aiEnabled) {
+      throw new Error('Akses Vintra AI belum diaktifkan oleh pemilik usaha.')
+    }
+  }
+  return auth
 }

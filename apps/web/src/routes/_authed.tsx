@@ -7,6 +7,7 @@ import { ImpersonationBanner } from '@/components/layout/impersonation-banner'
 import { BranchProvider } from '@/hooks/use-branch'
 import { useAuth } from '@/hooks/use-auth'
 import { useInventorySync } from '@/hooks/use-inventory-sync'
+import { BusinessAiFab } from '@/components/business-ai/business-ai-fab'
 import { ROUTE_TITLE_KEYS } from '@/lib/constants'
 
 export const Route = createFileRoute('/_authed')({
@@ -83,6 +84,11 @@ function AuthedLayout() {
           onLogout={handleLogout}
         >
           <Outlet />
+          {/* Vintra AI. Renders nothing unless the tier includes it AND the
+              member is allowed — it hides itself on /pos/cashier so it never
+              covers the till. */}
+          <BusinessAiFab />
+
         </AppLayout>
       </div>
     </BranchProvider>
