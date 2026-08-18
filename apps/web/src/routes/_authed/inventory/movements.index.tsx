@@ -40,13 +40,19 @@ import { useBranch } from '@/hooks/use-branch'
 import { formatRupiah } from '@/lib/currency'
 import { cn, formatDate, formatNumberID } from '@/lib/utils' // JUR-137
 
+const MOVEMENTS_PAGE_SIZE = 50
+
 export const Route = createFileRoute('/_authed/inventory/movements/')({
   loader: async () => {
     // The movement history is fetched client-side (it follows the
     // topbar branch switcher); the loader only preps the branch-
     // agnostic data the "record movement" form needs.
     const [items, masters, overview] = await Promise.all([
-      listInventoryItems({ data: { page: 1, pageSize: 200 } }),
+      // 500 = the server's own cap. The previous 200 was exactly the size of
+      // JuraganQu's largest tenant, i.e. zero headroom: one more item and
+      // entries would have vanished from the picker and the filter with no
+      // error to notice.
+      listInventoryItems({ data: { page: 1, pageSize: 500 } }),
       listInventoryFormMasters(),
       getInventoryOverview(),
     ])
@@ -74,21 +80,56 @@ function MovementsPage() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const { selectedBranchId } = useBranch()
+  /**
+   * The ledger books a row per ingredient per sale, so a busy outlet writes
+   * thousands a day. It used to fetch page 1 of 50 with no pager and no
+   * filters, which meant the screen showed the last few minutes and nothing
+   * older could be reached at all.
+   *
+   * Paging alone would still be dozens of pages per day, so it opens on TODAY
+   * and offers the two cuts an owner actually comes here for: a date range and
+   * a single item.
+   */
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const [fromDate, setFromDate] = useState(todayStr)
+  const [toDate, setToDate] = useState(todayStr)
+  const [filterItemId, setFilterItemId] = useState('')
+  const [page, setPage] = useState(1)
   const [recordOpen, setRecordOpen] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  // A page number from the previous filter is meaningless, and an
+  // out-of-range page renders an empty table that reads as "no movements".
+  useEffect(() => {
+    setPage(1)
+  }, [selectedBranchId, fromDate, toDate, filterItemId])
+
   // History follows the topbar branch switcher.
   const movementsQuery = useQuery({
-    queryKey: ['inventory', 'movements', selectedBranchId],
+    queryKey: [
+      'inventory',
+      'movements',
+      selectedBranchId,
+      fromDate,
+      toDate,
+      filterItemId,
+      page,
+    ],
     queryFn: () =>
       listInventoryMovements({
         data: {
-          page: 1,
-          pageSize: 50,
+          page,
+          pageSize: MOVEMENTS_PAGE_SIZE,
           branchId: selectedBranchId ?? undefined,
+          from: fromDate || undefined,
+          to: toDate || undefined,
+          itemId: filterItemId || undefined,
         },
       }),
+    // Keep the current rows while the next page loads so the table does not
+    // collapse and shove the layout around.
+    placeholderData: (prev) => prev,
   })
   const movements = movementsQuery.data?.items ?? []
   const movementToDelete = movements.find((m) => m.id === deletingId) ?? null
@@ -146,6 +187,50 @@ function MovementsPage() {
           <Button variant="brand" onClick={() => setRecordOpen(true)}>
             <Plus className="mr-1 h-4 w-4" /> {t('inventory.recordMovement')}
           </Button>
+        </div>
+      </div>
+
+      {/* Filters. The ledger opens on today because a busy outlet books
+          thousands of rows a day — without a default range this screen is
+          dozens of pages before it says anything useful. */}
+      <div className="mb-4 grid gap-3 sm:grid-cols-[1fr_1fr_2fr]">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+            Dari tanggal
+          </label>
+          <Input
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setFromDate(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+            Sampai tanggal
+          </label>
+          <Input
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setToDate(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+            Item
+          </label>
+          <Select
+            value={filterItemId}
+            onChange={(e) => setFilterItemId(e.target.value)}
+            options={[
+              { value: '', label: 'Semua item' },
+              ...loader.items.items.map((it) => ({
+                value: it.id,
+                label: it.name,
+              })),
+            ]}
+          />
         </div>
       </div>
 
@@ -209,6 +294,46 @@ function MovementsPage() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Pager. Shown whenever there is more than one page — a count with no
+          way to move is just a statistic. */}
+      {(movementsQuery.data?.total ?? 0) > MOVEMENTS_PAGE_SIZE && (
+        <div className="mt-3 flex flex-col items-center justify-between gap-3 sm:flex-row">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Menampilkan {(page - 1) * MOVEMENTS_PAGE_SIZE + 1}–
+            {Math.min(page * MOVEMENTS_PAGE_SIZE, movementsQuery.data?.total ?? 0)}{' '}
+            dari {movementsQuery.data?.total ?? 0} pergerakan
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={page <= 1 || movementsQuery.isFetching}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Sebelumnya
+            </Button>
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              {page} /{' '}
+              {Math.max(
+                1,
+                Math.ceil((movementsQuery.data?.total ?? 0) / MOVEMENTS_PAGE_SIZE),
+              )}
+            </span>
+            <Button
+              variant="outline"
+              disabled={
+                page >=
+                  Math.ceil(
+                    (movementsQuery.data?.total ?? 0) / MOVEMENTS_PAGE_SIZE,
+                  ) || movementsQuery.isFetching
+              }
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Berikutnya
+            </Button>
+          </div>
         </div>
       )}
 

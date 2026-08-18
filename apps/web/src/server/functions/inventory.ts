@@ -18,7 +18,7 @@ import {
   tenantCategories,
   masterHppUnits,
 } from '@vintra/db/schema'
-import { and, eq, sql, desc, gte, ilike, inArray, isNull } from 'drizzle-orm'
+import { and, eq, sql, desc, gte, lte, ilike, inArray, isNull } from 'drizzle-orm'
 import {
   inventoryTierLimits,
   type InventoryFeatureFlag,
@@ -2745,6 +2745,17 @@ export const listInventoryMovements = createServerFn({ method: 'POST' })
       conds.push(gte(inventoryMovements.createdAt, effectiveFrom))
     } else if (minFrom) {
       conds.push(gte(inventoryMovements.createdAt, minFrom))
+    }
+
+    // `to` was declared in the input schema but never applied, so a caller
+    // asking for a date range got the ENTIRE history back with nothing to
+    // indicate the upper bound had been ignored. A filter that silently does
+    // half its job is worse than one that is missing outright.
+    //
+    // The bound is the END of the named day: `to=2026-08-18` must include
+    // everything that happened on the 18th, not stop at its midnight.
+    if (data.to) {
+      conds.push(lte(inventoryMovements.createdAt, new Date(`${data.to}T23:59:59.999`)))
     }
 
     const offset = (data.page - 1) * data.pageSize

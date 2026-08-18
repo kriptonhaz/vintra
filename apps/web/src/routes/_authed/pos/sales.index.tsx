@@ -38,6 +38,8 @@ const PAYMENT_LABEL: Record<string, string> = {
 }
 
 // Stable display order for the reconciliation summary cards.
+const PAGE_SIZE = 50
+
 const PAYMENT_ORDER: string[] = [
   'cash',
   'qris',
@@ -76,9 +78,22 @@ function SalesPage() {
   const { t } = useTranslation()
   const { toast } = useToast()
 
+  /**
+   * The list is newest-first, so without a pager everything older than the
+   * first page was simply unreachable — a branch ringing a few hundred sales
+   * a day would see only its most recent hours and read that as "the morning
+   * is missing".
+   */
+  const [page, setPage] = React.useState(1)
   const [from, setFrom] = React.useState(search.date ?? '')
   const [to, setTo] = React.useState(search.date ?? '')
   const { selectedBranchId } = useBranch()
+
+  // A page number from the previous filter is meaningless, and an
+  // out-of-range page renders an empty table that reads as "no transactions".
+  React.useEffect(() => {
+    setPage(1)
+  }, [from, to, search.status, search.paymentMethod, selectedBranchId])
 
   const sales = useQuery({
     queryKey: [
@@ -313,6 +328,40 @@ function SalesPage() {
               ))}
             </TableBody>
           </Table>
+      )}
+
+      {/* Pager. Rendered whenever there is more than one page — a count with
+          no way to move is just a statistic. */}
+      {(sales.data?.total ?? 0) > PAGE_SIZE && (
+        <div className="mt-3 flex flex-col items-center justify-between gap-3 sm:flex-row">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Menampilkan {(page - 1) * PAGE_SIZE + 1}–
+            {Math.min(page * PAGE_SIZE, sales.data?.total ?? 0)} dari{' '}
+            {sales.data?.total ?? 0} transaksi
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={page <= 1 || sales.isFetching}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Sebelumnya
+            </Button>
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              {page} / {Math.max(1, Math.ceil((sales.data?.total ?? 0) / PAGE_SIZE))}
+            </span>
+            <Button
+              variant="outline"
+              disabled={
+                page >= Math.ceil((sales.data?.total ?? 0) / PAGE_SIZE) ||
+                sales.isFetching
+              }
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Berikutnya
+            </Button>
+          </div>
+        </div>
         )}
       </div>
     </div>
