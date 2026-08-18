@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useLocation } from '@tanstack/react-router'
-import { X , Sparkles } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useCurrentUser } from '@/hooks/use-permissions'
+import logoWhite from '@/assets/images/logo-white.png'
 import { BusinessAiPanel, type AiChatMsg } from './business-ai-panel'
 
 /**
@@ -53,7 +54,7 @@ export function BusinessAiFab() {
             <X className="h-6 w-6" />
           </span>
         ) : (
-          <Sparkles className="h-5 w-5" />
+          <img src={logoWhite} alt="Vintra AI" className="h-7 w-7" />
         )}
       </button>
     </>
