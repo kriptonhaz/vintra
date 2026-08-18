@@ -5,9 +5,9 @@ import { useCurrentUser } from '@/hooks/use-permissions'
 import { BusinessAiPanel, type AiChatMsg } from './business-ai-panel'
 
 /**
- * Vintra AI floating action button (Sultan tier). Rendered on every
+ * Vintra AI floating action button (Komplit tier). Rendered on every
  * authed route via `_authed.tsx`; renders nothing unless BOTH gates
- * pass — the tenant tier carries `juragan_ai` AND this member has the
+ * pass — the tenant tier carries `business_ai` AND this member has the
  * owner-granted `businessAiEnabled` flag (owners always do).
  *
  * Chat state lives here (not in the panel) so the conversation survives
@@ -23,7 +23,7 @@ export function BusinessAiFab() {
   const [messages, setMessages] = useState<AiChatMsg[]>([])
 
   const hasAccess =
-    (user?.moduleSubscriptions?.pos?.features ?? []).includes('juragan_ai') &&
+    (user?.moduleSubscriptions?.pos?.features ?? []).includes('business_ai') &&
     user?.businessAiEnabled === true
 
   // The cashier screen is a dense full-width flow — the FAB would sit

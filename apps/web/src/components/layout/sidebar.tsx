@@ -391,7 +391,12 @@ export function Sidebar({ isOpen, onClose, onLogout, user, compact }: SidebarPro
 
   // Feature flags from the POS subscription drive both MODULE_NAV
   // and MASTER_DATA_NAV filtering. Computed once and reused below.
-  const posFeatures = new Set(currentUser?.moduleSubscriptions?.pos?.features ?? []);
+  // Deliberately Set<string>, not Set<POSFeatureFlag>: `wa_active` below is a
+  // synthetic marker for the WhatsApp subscription, not a POS feature, and the
+  // nav config's `feature` fields are plain strings.
+  const posFeatures = new Set<string>(
+    currentUser?.moduleSubscriptions?.pos?.features ?? [],
+  );
   // Add wa_active feature when the tenant has an active WA subscription
   if (waSub?.active) posFeatures.add('wa_active');
 

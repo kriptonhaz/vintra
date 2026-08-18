@@ -16,6 +16,7 @@ import {
   posTierLimits,
   coerceStorablePhone,
 } from '@vintra/shared'
+import type { POSFeatureFlag } from '@vintra/shared'
 import { attributeReferralIfPresent } from '../lib/referral-attribute'
 import { db } from '@vintra/db'
 import {
@@ -298,7 +299,10 @@ export const getCurrentUser = createServerFn().handler(async () => {
       trialActive: boolean
       trialEndsAt: string | null
       trialUsed: boolean
-      features: ReadonlyArray<string>
+      // Typed as the flag union, not string[]: `.includes('salah_ketik')`
+      // on a string array compiles fine and silently returns false, which
+      // is how the Vintra AI button stayed invisible after a rename.
+      features: ReadonlyArray<POSFeatureFlag>
     }
     whatsapp?: {
       tier: string

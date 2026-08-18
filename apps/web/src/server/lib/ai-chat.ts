@@ -8,7 +8,7 @@
  *   - gemini   → functionDeclarations / functionCall / functionResponse
  *                on :generateContent
  *
- * Server-only (`server/lib`) — imported by juragan-ai.ts, never by client
+ * Server-only (`server/lib`) — imported by business-ai.ts, never by client
  * code. See ai-image-provider.ts for the bundle-stripping rationale.
  */
 
