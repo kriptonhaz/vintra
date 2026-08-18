@@ -47,10 +47,10 @@ export function BusinessAiFab() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? 'Tutup Vintra AI' : 'Buka Vintra AI'}
-        className="fixed right-4 bottom-4 z-40 flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border-2 border-brand-600 bg-brand-100 shadow-lg shadow-brand-600/30 transition-all hover:scale-105"
+        className="fixed right-4 bottom-4 z-40 flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-gray-900 shadow-lg shadow-gray-900/30 ring-1 ring-white/10 transition-all hover:scale-105 dark:bg-black"
       >
         {open ? (
-          <span className="flex h-full w-full items-center justify-center bg-brand-600 text-white">
+          <span className="flex h-full w-full items-center justify-center bg-gray-900 text-white dark:bg-black">
             <X className="h-6 w-6" />
           </span>
         ) : (

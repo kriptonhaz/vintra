@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import logo from '@/assets/images/logo.png'
 import logoWhite from '@/assets/images/logo-white.png'
 import { Loader2, Send, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -99,10 +98,9 @@ export function BusinessAiPanel({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
         <div className="flex items-center gap-2">
-          <>
-            <img src={logo} alt="" className="h-6 w-6 dark:hidden" />
-            <img src={logoWhite} alt="" className="hidden h-6 w-6 dark:block" />
-          </>
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-900 dark:bg-black">
+            <img src={logoWhite} alt="" className="h-5 w-5" />
+          </span>
           <div>
             <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
               Vintra AI
@@ -126,10 +124,9 @@ export function BusinessAiPanel({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <>
-              <img src={logo} alt="" className="h-12 w-12 opacity-80 dark:hidden" />
-              <img src={logoWhite} alt="" className="hidden h-12 w-12 opacity-80 dark:block" />
-            </>
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-gray-900 dark:bg-black">
+              <img src={logoWhite} alt="" className="h-9 w-9" />
+            </span>
             <p className="max-w-[240px] text-sm text-gray-500">
               Tanyakan apa saja tentang penjualan, stok, kas, atau absensi
               usahamu.
