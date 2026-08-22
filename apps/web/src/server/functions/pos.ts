@@ -61,6 +61,7 @@ import {
   assertBranchAllowed,
   filterBranchesByAccess,
   branchScopeWhere,
+  branchScopeSql,
 } from '../lib/branch-scope'
 import {
   findOpenSession,
@@ -310,9 +311,7 @@ export const getPOSOverview = createServerFn()
   if (branchId) assertBranchAllowed(auth, branchId)
   const branchFilterSql = branchId
     ? sql`branch_id = ${branchId}`
-    : auth.allowedBranchIds === null
-      ? sql`TRUE`
-      : sql`branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+    : branchScopeSql(auth, sql`branch_id`)
 
   const [todayRow] = await db.execute<{
     sales_count: number
@@ -365,9 +364,7 @@ export const getPOSOverview = createServerFn()
       AND ${
         branchId
           ? sql`s.branch_id = ${branchId}`
-          : auth.allowedBranchIds === null
-            ? sql`TRUE`
-            : sql`s.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+          : branchScopeSql(auth, sql`s.branch_id`)
       }
       AND s.created_at >= ((now() AT TIME ZONE 'Asia/Jakarta')::date::timestamp) AT TIME ZONE 'Asia/Jakarta'
       AND s.created_at <  (((now() AT TIME ZONE 'Asia/Jakarta')::date + interval '1 day')::timestamp) AT TIME ZONE 'Asia/Jakarta'
@@ -448,9 +445,7 @@ export const getSalesSeries = createServerFn()
     // buckets still appear (zero-revenue days/weeks render a flat line).
     const branchFilterSql = branchId
       ? sql`AND s.branch_id = ${branchId}`
-      : auth.allowedBranchIds === null
-        ? sql``
-        : sql`AND s.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+      : sql`AND ${branchScopeSql(auth, sql`s.branch_id`)}`
 
     // `unit` and `count` come from the fixed PERIOD_CONFIG map (never
     // user input), so sql.raw is safe here.
@@ -3620,9 +3615,7 @@ export const getDailyZReport = createServerFn({ method: 'POST' })
     if (data.branchId) assertBranchAllowed(auth, data.branchId)
     const branchClause = data.branchId
       ? sql`AND s.branch_id = ${data.branchId}`
-      : auth.allowedBranchIds === null
-        ? sql``
-        : sql`AND s.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+      : sql`AND ${branchScopeSql(auth, sql`s.branch_id`)}`
 
     const totalsRow = await db.execute<{
       sales_count: number
@@ -3713,9 +3706,7 @@ export const getDailyZReport = createServerFn({ method: 'POST' })
         ${
           data.branchId
             ? sql`AND s.branch_id = ${data.branchId}`
-            : auth.allowedBranchIds === null
-              ? sql``
-              : sql`AND s.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+            : sql`AND ${branchScopeSql(auth, sql`s.branch_id`)}`
         }
       ORDER BY s.opened_at
     `)
@@ -3825,14 +3816,10 @@ export const getPOSReport = createServerFn({ method: 'POST' })
     if (data.branchId) assertBranchAllowed(auth, data.branchId)
     const branchClause = data.branchId
       ? sql`AND s.branch_id = ${data.branchId}`
-      : auth.allowedBranchIds === null
-        ? sql``
-        : sql`AND s.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+      : sql`AND ${branchScopeSql(auth, sql`s.branch_id`)}`
     const branchClauseS2 = data.branchId
       ? sql`AND s2.branch_id = ${data.branchId}`
-      : auth.allowedBranchIds === null
-        ? sql``
-        : sql`AND s2.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+      : sql`AND ${branchScopeSql(auth, sql`s2.branch_id`)}`
 
     // Headline aggregations — single round-trip pulls all the totals
     // the ringkasan card needs. Discounts are split into line vs sale
@@ -3954,9 +3941,7 @@ export const getPOSReport = createServerFn({ method: 'POST' })
     // counted by movement created_at. Both honour the branch scope.
     const branchClauseSes = data.branchId
       ? sql`AND s.branch_id = ${data.branchId}`
-      : auth.allowedBranchIds === null
-        ? sql``
-        : sql`AND s.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+      : sql`AND ${branchScopeSql(auth, sql`s.branch_id`)}`
     const petiKasSessionsRow = await db.execute<{
       sessions_opened: number
       variance_total: number | null

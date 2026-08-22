@@ -24,7 +24,7 @@
  * scattered `if (auth.allowedBranchIds === null) ...` checks.
  */
 
-import { inArray, type SQL } from 'drizzle-orm'
+import { inArray, sql, type SQL } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import type { AuthContext } from '../middleware/auth'
 
@@ -71,4 +71,46 @@ export function branchScopeWhere(
     ])
   }
   return inArray(branchColumn, auth.allowedBranchIds)
+}
+
+/**
+ * Branch-scope predicate for HAND-WRITTEN `sql` fragments, where the
+ * branch column is an alias (`b.branch_id`, `s2.branch_id`) and so
+ * there is no Drizzle column object to hand `branchScopeWhere`.
+ *
+ * Exists because the obvious spelling is silently broken:
+ *
+ *     sql`b.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`   // WRONG
+ *
+ * Drizzle binds the JS array as ONE parameter, so Postgres receives a
+ * bare uuid string where it expects an array literal and throws
+ * `malformed array literal`. It fails only for members pinned to
+ * specific branches — an owner's `allowedBranchIds` is null and never
+ * reaches this branch of the ternary — so it survives any amount of
+ * testing done as the owner. This exact bug was fixed once before in
+ * the Drizzle query-builder call sites and left standing in eleven
+ * raw-SQL ones, where it took down whole pages for supervisors.
+ *
+ * Returns `true` (the literal) rather than null when the caller is
+ * unrestricted, so it drops into `AND ${...}` with no null check and
+ * no chance of a forgotten branch leaving the query unfiltered.
+ */
+export function branchScopeSql(
+  // Structural, not `AuthContext`: this reads one field, and callers
+  // like `pos-reports.buildScope` legitimately hold only that field.
+  auth: { allowedBranchIds: readonly string[] | null },
+  branchColumn: SQL,
+): SQL {
+  if (auth.allowedBranchIds === null) return sql`true`
+  // Defensive, mirroring `branchScopeWhere`: an empty allowed list must
+  // match nothing rather than everything. `IN ()` is a syntax error, so
+  // an impossible uuid stands in.
+  const ids =
+    auth.allowedBranchIds.length > 0
+      ? auth.allowedBranchIds
+      : ['00000000-0000-0000-0000-000000000000']
+  return sql`${branchColumn} IN (${sql.join(
+    ids.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  )})`
 }

@@ -14,7 +14,7 @@ import { sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@vintra/db'
 import { requirePOSAccess } from '../middleware/module-access'
-import { assertBranchAllowed } from '../lib/branch-scope'
+import { assertBranchAllowed, branchScopeSql } from '../lib/branch-scope'
 
 function ensureReportAccess(perms: readonly string[]) {
   if (!perms.includes('pos.report.view')) {
@@ -42,9 +42,7 @@ function buildScope(
   const endUtc = sql`(((${data.to}::date + interval '1 day')::timestamp) AT TIME ZONE 'Asia/Jakarta')`
   const branchClause = data.branchId
     ? sql`AND s.branch_id = ${data.branchId}`
-    : auth.allowedBranchIds === null
-      ? sql``
-      : sql`AND s.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+    : sql`AND ${branchScopeSql(auth, sql`s.branch_id`)}`
   return { startUtc, endUtc, branchClause }
 }
 

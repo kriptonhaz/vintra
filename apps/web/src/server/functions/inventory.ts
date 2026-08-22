@@ -30,6 +30,7 @@ import {
   assertBranchAllowed,
   filterBranchesByAccess,
   branchScopeWhere,
+  branchScopeSql,
 } from '../lib/branch-scope'
 import { createNotification } from '../notifications'
 import { NOTIFICATION_TYPES } from '@vintra/shared'
@@ -413,9 +414,7 @@ export const listInventoryItems = createServerFn({ method: 'POST' })
     if (data.branchId) assertBranchAllowed(auth, data.branchId)
     const balanceFilter = data.branchId
       ? sql`AND b.branch_id = ${data.branchId}`
-      : auth.allowedBranchIds === null
-        ? sql``
-        : sql`AND b.branch_id = ANY(${auth.allowedBranchIds}::uuid[])`
+      : sql`AND ${branchScopeSql(auth, sql`b.branch_id`)}`
 
     const itemsQ = await db.execute<{
       id: string
