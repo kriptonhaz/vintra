@@ -64,7 +64,7 @@ export interface DeductBomArgs {
   referenceType: string
   /** FK target — sale id, prep batch id, etc. */
   referenceId: string
-  /** Prefix for the movement's `notes` column (e.g. "JQU-2026-00042" or "Prep Teh — 50 cup"). */
+  /** Prefix for the movement's `notes` column (e.g. "VTR-2026-00042" or "Prep Teh — 50 cup"). */
   notesPrefix: string
   /**
    * JUR-15 v2: which BOM rows to walk based on their `add_at` column.

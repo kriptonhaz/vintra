@@ -242,7 +242,22 @@ export function computeLoyaltyEarn(
 }
 
 /**
- * Atomic per-tenant sale counter. Format: `JQU-YYYY-NNNNN`.
+ * Prefix on every receipt number.
+ *
+ * "VTR" for Vintra. It was "JQU" — JuraganQu, the codebase this was
+ * forked from — which meant every Vintra merchant handed their
+ * customers a receipt branded with another product's name.
+ *
+ * A constant rather than a per-tenant column: the number identifies the
+ * platform that issued the receipt, and a tenant already has their own
+ * business name printed above it. Changing this renumbers nothing —
+ * `pos_sale_counters` keeps the sequence, so existing receipts keep
+ * their old prefix and only new sales carry the new one.
+ */
+const SALE_NUMBER_PREFIX = 'VTR'
+
+/**
+ * Atomic per-tenant sale counter. Format: `VTR-YYYY-NNNNN`.
  *
  * Semantics: `next_seq` always points at the seq the NEXT sale will
  * use. We assign `next_seq - 1` to the current sale (after the
@@ -250,7 +265,7 @@ export function computeLoyaltyEarn(
  * `next_seq = 2` so the just-used number is 1 (not 0 — the
  * previous version inserted 1 then returned the inserted value
  * unchanged, which is why the very first sale ended up as
- * `JQU-YYYY-00000`).
+ * `VTR-YYYY-00000`).
  *
  * Resets cleanly when the year rolls over. Single upsert + RETURNING
  * is safe under concurrent inserts because PostgreSQL serialises the
@@ -275,7 +290,7 @@ async function nextSaleNumber(
     RETURNING (pos_sale_counters.next_seq - 1) AS used_seq
   `)
   const useSeq = Number(row?.used_seq ?? 1)
-  return `JQU-${year}-${String(useSeq).padStart(5, '0')}`
+  return `${SALE_NUMBER_PREFIX}-${year}-${String(useSeq).padStart(5, '0')}`
 }
 
 // ─── Overview / dashboard ────────────────────────────────────────────
