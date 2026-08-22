@@ -102,3 +102,28 @@ export function getMarginLevel(margin: number): 'danger' | 'warning' | 'good' {
   if (margin < 40) return 'warning'
   return 'good'
 }
+
+/**
+ * Margin of an inventory item, from the two numbers the item list already
+ * carries: `costPrice` and the cheapest tier-1 price, both per BASE unit.
+ *
+ * Exists because resale goods — snacks, bottled drinks, anything bought to
+ * be resold as-is — never pass through HPP, so `getHppReport` cannot see
+ * them. Their cost and price are nonetheless both recorded, and this is the
+ * only thing standing between those two numbers and a margin.
+ *
+ * Returns null when a margin would be fiction rather than fact:
+ *   - no selling price yet → nothing to compare against
+ *   - cost of 0 → the buy price was never entered. Arithmetic would call
+ *     that a flawless 100% margin, which is precisely backwards: it is the
+ *     case we know the LEAST about. Showing "—" says so.
+ */
+export function inventoryMargin(
+  costPerBaseUnit: number,
+  pricePerBaseUnit: number | null,
+): number | null {
+  if (pricePerBaseUnit == null || pricePerBaseUnit <= 0) return null
+  if (!Number.isFinite(costPerBaseUnit) || costPerBaseUnit <= 0) return null
+  if (!Number.isFinite(pricePerBaseUnit)) return null
+  return calculateMargin(pricePerBaseUnit, costPerBaseUnit)
+}

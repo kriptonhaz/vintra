@@ -39,6 +39,8 @@ import {
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast } from '@/components/ui/toast'
 import { formatRupiah } from '@/lib/currency'
+import { inventoryMargin } from '@/lib/hpp-calculator'
+import { MarginPill } from '@/components/inventory/margin-pill'
 import { ModuleBreadcrumb } from '@/components/layout/module-breadcrumb'
 import { cn, formatDate, formatNumberID } from '@/lib/utils' // JUR-137
 import { HppLinkPicker, SellableToggle, PrepModeToggle, BookingFields, OnlineFields } from './items.index'
@@ -1456,7 +1458,6 @@ function UnitCard({
       {unit.tiers.length > 0 ? (
         <ul className="space-y-1.5">
           {unit.tiers.map((t) => {
-            const isLoss = costPerUnit > 0 && t.unitPrice < costPerUnit
             return (
               <li
                 key={t.id}
@@ -1469,14 +1470,13 @@ function UnitCard({
                 <span className="flex-1 font-semibold text-gray-900 dark:text-gray-100">
                   {formatRupiah(t.unitPrice)} / {unit.unitLabel}
                 </span>
-                {isLoss && (
-                  <span
-                    title="Harga di bawah modal — Anda akan rugi"
-                    className="rounded bg-warning-100 px-1.5 py-0.5 text-xs font-medium text-warning-700 dark:bg-warning-900/30 dark:text-warning-400"
-                  >
-                    ⚠ Rugi
-                  </span>
-                )}
+                {/* Margin of THIS tier. `costPerUnit` is already scaled to
+                    the tier's unit above, so a bulk-pack tier is judged
+                    against the cost of a bulk pack, not of one piece. */}
+                <MarginPill
+                  className="ml-0"
+                  margin={inventoryMargin(costPerUnit, t.unitPrice)}
+                />
                 <button
                   type="button"
                   onClick={() => handleRemoveTier(t.id)}

@@ -28,6 +28,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PhotoUploadField } from '@/components/inventory/photo-upload-field'
 import { GalleryUploadField } from '@/components/inventory/gallery-upload-field'
 import { ApplyHppBanner } from '@/components/inventory/apply-hpp-banner'
+import { MarginPill } from '@/components/inventory/margin-pill'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -40,6 +41,7 @@ import {
 } from '@/components/ui/sheet'
 import { useToast } from '@/components/ui/toast'
 import { formatRupiah } from '@/lib/currency'
+import { inventoryMargin } from '@/lib/hpp-calculator'
 import { ModuleBreadcrumb } from '@/components/layout/module-breadcrumb'
 import { useBranch } from '@/hooks/use-branch'
 import { cn, formatNumberID } from '@/lib/utils' // JUR-137
@@ -447,6 +449,12 @@ function ItemsPage() {
                           Belum ada harga jual
                         </span>
                       )}
+                      <MarginPill
+                        margin={inventoryMargin(
+                          it.costPrice,
+                          it.lowestBaseUnitPrice,
+                        )}
+                      />
                     </p>
                   </div>
                   <div className="shrink-0 text-right">

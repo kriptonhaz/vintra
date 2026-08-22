@@ -3,6 +3,7 @@ import {
   bomRowUnitPrice,
   calculateMaterialCost,
   calculateMargin,
+  inventoryMargin,
   perUnitHpp,
 } from './hpp-calculator'
 import { statedUnitCost } from '../server/lib/stock-cost'
@@ -194,5 +195,49 @@ describe('regression: an HPP product\'s cost reaching inventory and POS', () => 
 
   it('a single-yield recipe is unaffected either way', () => {
     expect(perUnitHpp(5_000, 1)).toBe(5_000)
+  })
+})
+
+describe('inventoryMargin', () => {
+  // Resale goods never reach HPP, so this is the only place their cost and
+  // price ever meet. Getting it wrong misprices a whole category silently.
+
+  it('computes margin against the SELLING price, like everywhere else', () => {
+    // Teh Pucuk: buy 2.700, sell 4.000 → 32,5% of revenue, not 48% markup.
+    expect(inventoryMargin(2700, 4000)).toBeCloseTo(32.5, 1)
+  })
+
+  it('reports a loss as a negative number rather than clamping to zero', () => {
+    // The item detail page shows "Rugi" here; the list must agree, and a
+    // clamped 0% would read as "breaking even" on a losing item.
+    expect(inventoryMargin(5000, 4000)).toBeCloseTo(-25, 1)
+  })
+
+  it('returns null when no selling price has been set yet', () => {
+    expect(inventoryMargin(2700, null)).toBeNull()
+  })
+
+  it('returns null on a zero cost instead of claiming a perfect margin', () => {
+    // (4000 - 0) / 4000 = 100%. Arithmetically right, and the exact
+    // opposite of the truth: a 0 cost means the buy price was never
+    // entered, so this is the row we know LEAST about.
+    expect(inventoryMargin(0, 4000)).toBeNull()
+  })
+
+  it('returns null rather than Infinity or NaN on junk input', () => {
+    expect(inventoryMargin(Number.NaN, 4000)).toBeNull()
+    expect(inventoryMargin(2700, 0)).toBeNull()
+    expect(inventoryMargin(2700, Number.NaN)).toBeNull()
+  })
+
+  it('agrees with the tier editor about what counts as a loss', () => {
+    // items.$itemId.tsx flags a tier when `unitPrice < costPerUnit`. A
+    // margin below zero must mean the same thing, or one screen says
+    // "Rugi" while the other shows a healthy-looking percentage.
+    const cost = 900
+    for (const price of [1, 450, 899]) {
+      expect(inventoryMargin(cost, price)!).toBeLessThan(0)
+    }
+    expect(inventoryMargin(cost, 901)!).toBeGreaterThan(0)
   })
 })
