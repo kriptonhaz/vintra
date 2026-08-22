@@ -197,6 +197,11 @@ function CashierPage() {
   const supportsPromoCodes = (
     masters.data?.features ?? []
   ).includes('promo_codes')
+  // Whether the cashier offers the promo-code box. Server-resolved (tier
+  // AND the tenant's setting). Distinct from `supportsPromoCodes`, which
+  // still drives the AUTO-promo query below: a tenant can hide the typed
+  // code box and keep their automatic product/category promos running.
+  const showPromoCodeField = masters.data?.showPromoCodeField ?? false
 
   // Tenant's active auto-promos (product / category / cart). The
   // cashier-cart bakes their per-line discount into the breakdown +
@@ -1124,6 +1129,7 @@ function CashierPage() {
               onDiscountValueChange={setDiscountValue}
               promoCode={promoCode}
               onPromoCodeChange={setPromoCode}
+              showPromoCodeField={showPromoCodeField}
               promoAmount={promoAmount}
               promoLabel={promoLabel}
               promoError={promoError}

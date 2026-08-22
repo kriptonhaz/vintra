@@ -10,6 +10,7 @@ import {
   updatePOSCashSettings,
   updateBranchCashStaleConfig,
   updatePOSAdhocSetting,
+  updatePOSPromoCodeSetting,
 } from '@/server/functions/pos'
 import {
   listVoidCategories,
@@ -181,6 +182,16 @@ function POSSettingsPage() {
         initialEnabled={data.settings?.adhocItemsEnabled ?? false}
         onSaved={() => router.invalidate()}
       />
+
+      {/* Only meaningful on a tier that HAS promo codes — on any other
+          tier the box never renders, so a switch for it would be a
+          control that visibly does nothing. */}
+      {limits.features.includes('promo_codes') && (
+        <PromoCodeFieldSection
+          initialEnabled={data.settings?.promoCodeFieldEnabled ?? true}
+          onSaved={() => router.invalidate()}
+        />
+      )}
 
       <ReceiptScopeSection
         tenantDefault={{
@@ -952,18 +963,37 @@ function CashStaleScopeForm({
  * wall). Default OFF: ad-hoc lines bypass the catalog + inventory, so a
  * tenant opts IN only when they sell services / one-off items.
  */
-function AdhocItemsSection({
+/**
+ * A settings card whose whole content is one on/off switch.
+ *
+ * Shared by every such setting so the switch markup, the optimistic
+ * flip, and the revert-on-failure all live in one place. Two hand-rolled
+ * copies would be free to drift — and the copy that drifts is the one
+ * whose failure path nobody exercises.
+ *
+ * Saves immediately on flip: a card holding a single switch has nowhere
+ * natural to put a Save button, and a switch that looks flipped but
+ * isn't saved is worse than one extra request.
+ */
+function SettingToggleSection({
+  title,
+  ariaLabel,
   initialEnabled,
+  save: saveFn,
   onSaved,
+  children,
 }: {
+  title: string
+  ariaLabel: string
   initialEnabled: boolean
+  save: (enabled: boolean) => Promise<unknown>
   onSaved: () => void
+  children: React.ReactNode
 }) {
   const { toast } = useToast()
   const [enabled, setEnabled] = React.useState(initialEnabled)
   const save = useMutation({
-    mutationFn: (next: boolean) =>
-      updatePOSAdhocSetting({ data: { enabled: next } }),
+    mutationFn: (next: boolean) => saveFn(next),
     onSuccess: () => {
       toast({ title: 'Pengaturan disimpan', variant: 'success' })
       onSaved()
@@ -986,25 +1016,14 @@ function AdhocItemsSection({
   }
 
   return (
-    <Section title='Item Lain (item di luar katalog)'>
+    <Section title={title}>
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Saat aktif, kasir bisa menambah "Item Lain" — item manual
-            dengan nama dan harga bebas, di luar katalog produk. Cocok
-            untuk jasa atau penjualan satu kali.
-          </p>
-          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-            Item Lain tidak tercatat di stok inventory dan tidak terhubung
-            ke produk, sehingga lebih sulit diaudit. Matikan jika kamu
-            ingin semua penjualan tercatat lewat katalog.
-          </p>
-        </div>
+        <div className="min-w-0">{children}</div>
         <button
           type="button"
           role="switch"
           aria-checked={enabled}
-          aria-label="Aktifkan Item Lain di kasir"
+          aria-label={ariaLabel}
           disabled={save.isPending}
           onClick={toggle}
           className={cn(
@@ -1021,6 +1040,64 @@ function AdhocItemsSection({
         </button>
       </div>
     </Section>
+  )
+}
+
+function AdhocItemsSection({
+  initialEnabled,
+  onSaved,
+}: {
+  initialEnabled: boolean
+  onSaved: () => void
+}) {
+  return (
+    <SettingToggleSection
+      title="Item Lain (item di luar katalog)"
+      ariaLabel="Aktifkan Item Lain di kasir"
+      initialEnabled={initialEnabled}
+      save={(enabled) => updatePOSAdhocSetting({ data: { enabled } })}
+      onSaved={onSaved}
+    >
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Saat aktif, kasir bisa menambah "Item Lain" — item manual
+        dengan nama dan harga bebas, di luar katalog produk. Cocok
+        untuk jasa atau penjualan satu kali.
+      </p>
+      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+        Item Lain tidak tercatat di stok inventory dan tidak terhubung
+        ke produk, sehingga lebih sulit diaudit. Matikan jika kamu
+        ingin semua penjualan tercatat lewat katalog.
+      </p>
+    </SettingToggleSection>
+  )
+}
+
+function PromoCodeFieldSection({
+  initialEnabled,
+  onSaved,
+}: {
+  initialEnabled: boolean
+  onSaved: () => void
+}) {
+  return (
+    <SettingToggleSection
+      title="Kode promo di kasir"
+      ariaLabel="Tampilkan kolom kode promo di kasir"
+      initialEnabled={initialEnabled}
+      save={(enabled) => updatePOSPromoCodeSetting({ data: { enabled } })}
+      onSaved={onSaved}
+    >
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Saat aktif, kasir melihat kolom "Kode promo" di keranjang untuk
+        mengetik kode diskon dari pelanggan. Matikan jika kamu tidak
+        memakai kode promo — kolomnya hilang dari layar kasir.
+      </p>
+      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+        Promo otomatis (per produk, kategori, atau total keranjang) tetap
+        berjalan meski kolom ini dimatikan — yang disembunyikan hanya
+        kolom ketik kodenya.
+      </p>
+    </SettingToggleSection>
   )
 }
 

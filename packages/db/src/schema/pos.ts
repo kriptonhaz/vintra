@@ -251,6 +251,23 @@ export const posSettings = pgTable(
     adhocItemsEnabled: boolean('adhoc_items_enabled')
       .notNull()
       .default(false),
+    /**
+     * Whether the cashier shows the promo-code box. Only consulted when
+     * the tier already includes `promo_codes` — this narrows that
+     * feature, it cannot grant it.
+     *
+     * Default true, unlike `adhocItemsEnabled` above: tenants already
+     * running promo codes must not lose the field when this ships.
+     * Opting out is the new capability.
+     *
+     * Presentation only. `createSale` still honours a valid code sent
+     * with a sale — this is decluttering, not an anti-fraud gate like
+     * ad-hoc lines, and refusing a genuine discount over a display
+     * preference would cost the customer real money.
+     */
+    promoCodeFieldEnabled: boolean('promo_code_field_enabled')
+      .notNull()
+      .default(true),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

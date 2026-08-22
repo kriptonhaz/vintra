@@ -1030,6 +1030,13 @@
       "when": 1787659200000,
       "tag": "0146_business_ai_member_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1787832000000,
+      "tag": "0147_pos_promo_code_field_toggle",
+      "breakpoints": true
     }
   ]
 }

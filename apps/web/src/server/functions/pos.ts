@@ -46,6 +46,7 @@ import {
 } from '@vintra/shared'
 import { requirePOSAccess } from '../middleware/module-access'
 import { isPriceChanged } from '../lib/pos-price-guard'
+import { resolvePromoCodeFieldVisible } from '../lib/pos-promo-field'
 import { perUnitHpp } from '@/lib/hpp-calculator'
 import {
   writePosSaleCashflowEntry,
@@ -535,6 +536,7 @@ export const getPOSCashierMasters = createServerFn({ method: 'POST' })
           cashDrawerEnabled: posSettings.cashDrawerEnabled,
           cashVarianceThreshold: posSettings.cashVarianceThreshold,
           adhocItemsEnabled: posSettings.adhocItemsEnabled,
+          promoCodeFieldEnabled: posSettings.promoCodeFieldEnabled,
         })
         .from(posSettings)
         .where(eq(posSettings.tenantId, auth.tenantId))
@@ -625,6 +627,17 @@ export const getPOSCashierMasters = createServerFn({ method: 'POST' })
       // tenants with no settings row yet. The cashier hides the button
       // when false; createSale re-checks server-side.
       allowAdhocItems: settings?.adhocItemsEnabled ?? false,
+      /**
+       * Whether the cashier renders the promo-code box. ANDed with the
+       * tier flag here so the cashier reads one boolean and can never
+       * show the field to a tier that has no promo codes, whatever the
+       * settings row happens to say. Defaults true for tenants with no
+       * settings row yet, matching the column default.
+       */
+      showPromoCodeField: resolvePromoCodeFieldVisible({
+        tierHasPromoCodes: limits.features.includes('promo_codes'),
+        tenantSetting: settings?.promoCodeFieldEnabled,
+      }),
       features: limits.features,
     }
   })
@@ -4240,6 +4253,30 @@ export const updatePOSAdhocSetting = createServerFn({ method: 'POST' })
       .onConflictDoUpdate({
         target: posSettings.tenantId,
         set: { adhocItemsEnabled: data.enabled, updatedAt: new Date() },
+      })
+    return { success: true as const }
+  })
+
+/**
+ * Standalone toggle for the cashier's promo-code box.
+ *
+ * Ungated for the same reason as `updatePOSAdhocSetting`: a tenant must
+ * always be able to undo a switch they can see. Writing it on a tier
+ * without `promo_codes` is harmless — `getPOSMasters` ANDs the stored
+ * value with the tier flag, so the field still won't render.
+ *
+ * Upserts so a tenant with no pos_settings row yet still lands one.
+ */
+export const updatePOSPromoCodeSetting = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ enabled: z.boolean() }))
+  .handler(async ({ data }) => {
+    const auth = await requirePOSAccess()
+    await db
+      .insert(posSettings)
+      .values({ tenantId: auth.tenantId, promoCodeFieldEnabled: data.enabled })
+      .onConflictDoUpdate({
+        target: posSettings.tenantId,
+        set: { promoCodeFieldEnabled: data.enabled, updatedAt: new Date() },
       })
     return { success: true as const }
   })

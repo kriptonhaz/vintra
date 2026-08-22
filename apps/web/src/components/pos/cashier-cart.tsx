@@ -120,6 +120,14 @@ interface Props {
   promoCode: string
   onPromoCodeChange: (v: string) => void
   /**
+   * Whether to render the promo-code box at all. Resolved on the server
+   * (tier flag AND the tenant's own setting) so the cart reads one
+   * boolean instead of re-deriving the rule — a tenant that runs no
+   * promotions can hide the field rather than scroll past an empty
+   * input on every sale.
+   */
+  showPromoCodeField: boolean
+  /**
    * Server-validated promo discount in Rp (parent runs the live
    * validatePromoCode query). 0 when the code is empty/invalid. Drives
    * both the breakdown "Promo" row AND the post-promo total — without
@@ -192,6 +200,7 @@ export function CashierCart({
   onDiscountValueChange,
   promoCode,
   onPromoCodeChange,
+  showPromoCodeField,
   promoAmount = 0,
   promoError = null,
   promoLabel = null,
@@ -360,7 +369,7 @@ export function CashierCart({
           </ul>
         )}
 
-        {features.includes('promo_codes') && lines.length > 0 && (
+        {showPromoCodeField && lines.length > 0 && (
           <div className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
             <p className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
               Kode promo (opsional)
