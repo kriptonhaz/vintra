@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search, Package, Plus, Star } from 'lucide-react'
+import { Search, Package, Plus, Star, X } from 'lucide-react'
 import { listPOSProducts, getPOSCashierMasters } from '@/server/functions/pos'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -105,6 +105,10 @@ export function CashierProductGrid({
   headerRight,
 }: Props) {
   const [search, setSearch] = React.useState('')
+  // Held so clearing can hand focus straight back. On a phone that is
+  // the whole point: losing focus dismisses the keyboard, and the
+  // cashier has to tap the field again before typing the next item.
+  const searchRef = React.useRef<HTMLInputElement>(null)
   const [categoryId, setCategoryId] = React.useState<string | null>(null)
 
   const masters = useQuery({
@@ -145,11 +149,30 @@ export function CashierProductGrid({
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <Input
+              ref={searchRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Cari produk atau SKU…"
-              className="pl-9"
+              // Right padding only while the clear button is there, so
+              // the placeholder keeps the full width when it is not.
+              className={cn('pl-9', search && 'pr-10')}
             />
+            {search && (
+              /* One tap to start the next item. Ringing up two products
+                 means clearing a whole product name between them, which
+                 on a phone keyboard is a dozen backspaces. */
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('')
+                  searchRef.current?.focus()
+                }}
+                aria-label="Hapus pencarian"
+                className="absolute right-1 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
           {headerRight && <div className="shrink-0">{headerRight}</div>}
         </div>
