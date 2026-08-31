@@ -38,6 +38,11 @@ export interface POSProduct {
    */
   recipeBacked?: boolean
   /**
+   * False for consignment goods — no balance is kept, so the tile shows
+   * "Titipan" instead of a count and never gates on stock.
+   */
+  trackStock?: boolean
+  /**
    * Prep-mode flag (JUR-15). When true, the tile shows a "Siap: N"
    * badge instead of "Auto" and hard-disables when siapInBase = 0 —
    * the BOM was already deducted at "Prep batch" time, so the sale
@@ -295,10 +300,14 @@ function ProductCard({
   // sellable as long as ingredients exist (the BOM walker handles
   // the ingredient check at sale time, not here). For non-service
   // items, the existing stock gate stays. Prep-mode adds another gate.
-  const outOfStock = !product.recipeBacked && product.stockInBase <= 0
+  // Two different reasons an item carries no balance: made to order
+  // (recipe-backed) or stocked by the supplier (consignment). Neither
+  // can be judged "out of stock" from a balance nobody maintains.
+  const untracked = product.recipeBacked || product.trackStock === false
+  const outOfStock = !untracked && product.stockInBase <= 0
   const disabled = outOfStock || prepEmpty
   const lowStock =
-    !product.recipeBacked &&
+    !untracked &&
     product.stockInBase > 0 &&
     displayUnit &&
     stockInDisplay <= 5
@@ -363,6 +372,8 @@ function ProductCard({
             </span>
           ) : product.recipeBacked ? (
             <span className="text-xs text-gray-500">Stok bahan</span>
+          ) : product.trackStock === false ? (
+            <span className="text-xs text-gray-500">Stok pemasok</span>
           ) : (
             <span className="text-xs text-gray-500">
               Stok: {formatStock(stockInDisplay)} {displayUnit?.unitLabel ?? ''}
@@ -376,6 +387,8 @@ function ProductCard({
             )
           ) : product.recipeBacked ? (
             <Badge variant="default">Auto</Badge>
+          ) : product.trackStock === false ? (
+            <Badge variant="default">Titipan</Badge>
           ) : outOfStock ? (
             <Badge variant="danger">Habis</Badge>
           ) : lowStock ? (

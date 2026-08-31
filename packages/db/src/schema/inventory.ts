@@ -222,6 +222,22 @@ export const inventoryItems = pgTable(
     variantConfig: jsonb('variant_config').$type<{
       dims: Array<{ name: string; values: string[] }>
     } | null>(),
+    /**
+     * Whether this item carries a stock balance at all.
+     *
+     * False for consignment goods (konsinyasi): the supplier owns them,
+     * the merchant pays only for what sells, and no balance is ever
+     * counted. Such an item must still be sellable — so the POS stock
+     * guard skips it and the sale writes no stock-out movement, exactly
+     * as it already does for recipe-backed items, but for a different
+     * reason: those are made to order, these are stocked by someone else.
+     *
+     * Defaults true so every existing item keeps its balance. Turning it
+     * off does NOT delete the balance rows — it stops consulting them —
+     * so switching an item back on restores its old count rather than
+     * starting from zero.
+     */
+    trackStock: boolean('track_stock').notNull().default(true),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),

@@ -722,6 +722,7 @@ export const listPOSProducts = createServerFn({ method: 'POST' })
         prepMode: inventoryItems.prepMode,
         isFavorite: inventoryItems.isFavorite,
         hasVariants: inventoryItems.hasVariants,
+        trackStock: inventoryItems.trackStock,
       })
       .from(inventoryItems)
       .innerJoin(masterHppUnits, eq(masterHppUnits.id, inventoryItems.baseUnitId))
@@ -937,6 +938,9 @@ export const listPOSProducts = createServerFn({ method: 'POST' })
           // doesn't gate add-to-cart on stockInBase, and the sale path
           // skips the item-level out movement (only walks BOM).
           recipeBacked: Boolean(r.linkedHppProductId),
+          // Consignment goods carry no balance. The tile must not show
+          // "Habis" or gate add-to-cart on a number nobody counted.
+          trackStock: r.trackStock,
           // JUR-15: prep-mode override for recipe-backed items. When
           // true, the cashier tile shows "Siap: N" instead of "Auto"
           // and disables the tile when siapInBase = 0.
@@ -1161,6 +1165,7 @@ export const createSale = createServerFn({ method: 'POST' })
               costPrice: inventoryItems.costPrice,
               categoryId: inventoryItems.categoryId,
               linkedHppProductId: inventoryItems.linkedHppProductId,
+              trackStock: inventoryItems.trackStock,
               prepMode: inventoryItems.prepMode,
               hasVariants: inventoryItems.hasVariants,
               baseUnitId: inventoryItems.baseUnitId,
@@ -1694,6 +1699,11 @@ export const createSale = createServerFn({ method: 'POST' })
         // Variant lines deduct per-variant stock — guarded separately.
         if (p.variantId) continue
         if (itemMap.get(p.itemId)?.linkedHppProductId) continue
+        // Consignment (track_stock = false): the supplier holds the
+        // goods and no balance was ever counted, so there is nothing to
+        // compare against. Guarding on an uncounted 0 would refuse every
+        // sale of an item that is physically sitting on the counter.
+        if (itemMap.get(p.itemId)?.trackStock === false) continue
         requiredByItem.set(
           p.itemId,
           (requiredByItem.get(p.itemId) ?? 0) + p.qtyInBase,
@@ -2633,8 +2643,15 @@ export const createSale = createServerFn({ method: 'POST' })
         // item-level out movement here, otherwise sales push the recipe
         // item's balance negative even though stock was never tracked.
         // The cashier grid surfaces these as "Auto" instead of "Stok: N".
-        const recipeBacked = Boolean(itemMap.get(line.itemId)?.linkedHppProductId)
+        const soldItem = itemMap.get(line.itemId)
+        const recipeBacked = Boolean(soldItem?.linkedHppProductId)
         if (recipeBacked) continue
+
+        // Consignment: no balance is kept, so writing an out movement
+        // would drive a number nobody maintains steadily negative. The
+        // sale record itself is the history for these. Cost still rides
+        // on the line (`hppAtSale`), so margin reporting is unaffected.
+        if (soldItem?.trackStock === false) continue
 
         // Inline movement insert + balance upsert. We don't call
         // `recordMovement` because the inventory module's tier checks

@@ -45,6 +45,8 @@ export interface CartLine {
    * qty cap stays unbounded and the cart skips the stock check.
    */
   recipeBacked?: boolean
+  /** False for consignment goods — no balance, so no qty cap. */
+  trackStock?: boolean
   /**
    * Per-line discount (JUR-7). Optional. When set, this line's
    * subtotal becomes `qty × unitPrice - <computed amount>`. Stored
@@ -164,6 +166,9 @@ function maxQtyForLine(line: CartLine, allLines: CartLine[]): number {
   // walks the BOM to deduct ingredients. Skip the stock cap so the
   // cashier can ring as many cups as the bahan supports.
   if (line.recipeBacked) return Infinity
+  // Consignment: the supplier holds the goods, so there is no balance to
+  // cap against. The server skips its guard for the same reason.
+  if (line.trackStock === false) return Infinity
   if (line.stockInBase == null || line.ratioToBase == null) return Infinity
   const reservedByOthers = allLines
     .filter(

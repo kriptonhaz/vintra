@@ -125,6 +125,7 @@ const itemFormSchema = z.object({
    * inventory items (linked to an HPP material), true otherwise.
    */
   isSellable: z.boolean().optional(),
+  trackStock: z.boolean().optional(),
   /** JUR-183 booking fields. */
   isBookable: z.boolean().optional(),
   bookingColor: z.string().max(20).nullable().optional(),
@@ -465,6 +466,15 @@ function ItemsPage() {
                           dari bahan
                         </span>
                       </p>
+                    ) : it.trackStock === false ? (
+                      /* Consignment: the supplier holds the goods, so a
+                         number here would be one nobody counted. */
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Titipan
+                        <span className="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+                          stok pemasok
+                        </span>
+                      </p>
                     ) : (
                       <p
                         className={cn(
@@ -477,7 +487,9 @@ function ItemsPage() {
                         {formatNumberID(it.totalQuantity)} {it.baseUnit.label}
                       </p>
                     )}
-                    {it.branchesCount > 1 && !it.recipeBacked && (
+                    {it.branchesCount > 1 &&
+                      !it.recipeBacked &&
+                      it.trackStock !== false && (
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {it.branchesCount} cabang
                       </p>
@@ -611,6 +623,7 @@ function CreateItemForm({
       // picks the HPP-material link. Recipe-backed prefill stays
       // sellable.
       isSellable: true,
+      trackStock: true,
       // JUR-183: opt-in for booking; tenant flips per-item.
       isBookable: false,
       bookingColor: null,
@@ -809,6 +822,7 @@ function CreateItemForm({
           linkedHppProductId:
             linkSource === 'product' ? values.linkedHppProductId || null : null,
           isSellable: values.isSellable ?? true,
+          trackStock: values.trackStock ?? true,
           isBookable: values.isBookable ?? false,
           bookingColor: values.bookingColor ?? null,
           bookingDurationMin: values.bookingDurationMin ?? null,
@@ -1035,6 +1049,7 @@ function CreateItemForm({
         </div>
 
         <SellableToggle control={form.control} />
+        <TrackStockToggle control={form.control} />
         <BookingFields control={form.control} />
       </div>
       <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-6 py-4 dark:border-gray-700">
@@ -1134,6 +1149,54 @@ export function SellableToggle({
             <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
               Matikan untuk item yang hanya kamu pakai sebagai bahan
               baku — tidak akan muncul di grid produk kasir.
+            </span>
+          </span>
+        </label>
+      )}
+    />
+  )
+}
+
+/**
+ * Consignment switch. Off means the supplier owns the goods and this
+ * business only records what sells — so no balance is kept, the cashier
+ * never sees "Habis", and the stock forms leave the item out.
+ *
+ * Phrased as "Lacak stok" rather than "Konsinyasi" because the same
+ * switch fits anything the merchant does not hold: titip jual, a service
+ * sold as an item, a pre-order taken to order. Consignment is only the
+ * most common reason.
+ *
+ * Turning it off keeps whatever balance rows already exist — it stops
+ * consulting them — so switching back on restores the old count instead
+ * of starting from zero.
+ */
+export function TrackStockToggle({
+  control,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  control: any
+}) {
+  return (
+    <Controller
+      name="trackStock"
+      control={control}
+      render={({ field }) => (
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-900/40">
+          <input
+            type="checkbox"
+            checked={field.value ?? true}
+            onChange={(e) => field.onChange(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+          />
+          <span className="text-sm">
+            <span className="block font-medium text-gray-900 dark:text-gray-100">
+              Lacak stok item ini
+            </span>
+            <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
+              Matikan untuk barang titipan (konsinyasi) — stoknya milik
+              pemasok. Kasir tetap bisa menjualnya tanpa dibatasi jumlah,
+              dan item ini tidak muncul di form stok masuk atau opname.
             </span>
           </span>
         </label>

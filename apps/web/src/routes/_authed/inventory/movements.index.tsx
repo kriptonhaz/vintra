@@ -343,7 +343,13 @@ function MovementsPage() {
           <SheetDescription>{t('inventory.recordMovementDesc')}</SheetDescription>
         </SheetHeader>
         <RecordForm
-          items={loader.items.items.filter((it) => !it.recipeBacked)}
+          items={loader.items.items.filter(
+            // Neither kind carries a balance to move: recipe-backed items
+            // are deducted through their BOM, consignment items are the
+            // supplier's stock. Offering them here would write movements
+            // against a number nothing else reads.
+            (it) => !it.recipeBacked && it.trackStock !== false,
+          )}
           branches={loader.masters.branches}
           tier={loader.overview.tier}
           onCancel={() => setRecordOpen(false)}

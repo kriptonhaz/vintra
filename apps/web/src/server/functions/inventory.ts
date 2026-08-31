@@ -439,6 +439,7 @@ export const listInventoryItems = createServerFn({ method: 'POST' })
       is_bookable: boolean
       is_favorite: boolean
       category_id: string | null
+      track_stock: boolean
     }>(sql`
       SELECT
         i.id, i.sku, i.name,
@@ -452,6 +453,7 @@ export const listInventoryItems = createServerFn({ method: 'POST' })
         i.is_sellable,
         i.is_bookable,
         i.is_favorite,
+        i.track_stock,
         COALESCE(SUM(b.quantity), 0) AS total_quantity,
         COUNT(DISTINCT b.branch_id)::int AS branches_count,
         -- Cheapest tier 1 price across all units, normalised back to
@@ -476,7 +478,7 @@ export const listInventoryItems = createServerFn({ method: 'POST' })
       LEFT JOIN inventory_stock_balances b ON b.item_id = i.id ${balanceFilter}
       WHERE i.tenant_id = ${auth.tenantId} AND i.is_active = true
         ${data.search ? sql`AND i.name ILIKE ${`%${data.search}%`}` : sql``}
-      GROUP BY i.id, m.brand, c.name, u.value, u.label, i.linked_hpp_product_id, i.is_sellable, i.is_bookable, i.is_favorite, i.category_id
+      GROUP BY i.id, m.brand, c.name, u.value, u.label, i.linked_hpp_product_id, i.is_sellable, i.is_bookable, i.is_favorite, i.category_id, i.track_stock
       ${
         data.lowStockOnly
           ? sql`HAVING i.min_stock_level IS NOT NULL
@@ -517,7 +519,11 @@ export const listInventoryItems = createServerFn({ method: 'POST' })
         photoKey: r.photo_key,
         totalQuantity: Number(r.total_quantity),
         branchesCount: r.branches_count,
+        // An untracked item can never be "low": there is no count to be
+        // low against, and a warning badge on a consignment row would
+        // send the owner chasing a restock that is not theirs to do.
         isLowStock:
+          r.track_stock &&
           r.min_stock_level != null &&
           Number(r.total_quantity) < Number(r.min_stock_level),
         /**
@@ -529,6 +535,14 @@ export const listInventoryItems = createServerFn({ method: 'POST' })
          * use.
          */
         recipeBacked: Boolean(r.linked_hpp_product_id),
+        /**
+         * False for consignment goods — the supplier holds the stock, so
+         * the list shows "Titipan" rather than a count, and the stock
+         * forms leave the item out. Distinct from `recipeBacked`, which
+         * also has no balance but for the opposite reason (made to
+         * order from ingredients this tenant does own).
+         */
+        trackStock: r.track_stock,
         /** Whether the item appears in the POS catalog (Case 2). */
         isSellable: Boolean(r.is_sellable),
         /** JUR-183: whether the item appears in the booking service picker. */
@@ -977,6 +991,12 @@ const itemInput = z.object({
    */
   isSellable: z.boolean().optional(),
   /**
+   * Whether the item carries a stock balance. False for consignment
+   * goods, where the supplier owns the stock and only sales are
+   * recorded. Defaults true.
+   */
+  trackStock: z.boolean().optional(),
+  /**
    * JUR-183: surfaces this item in the booking service picker. Default
    * false at create; tenant flips per-item in /inventory/items. When
    * true (and is_sellable=true), the item appears in /booking's
@@ -1052,6 +1072,7 @@ export const createInventoryItem = createServerFn({ method: 'POST' })
             data.isSellable !== undefined
               ? data.isSellable
               : !(data.linkedHppMaterialId && !data.linkedHppProductId),
+          trackStock: data.trackStock ?? true,
           isBookable: data.isBookable ?? false,
           bookingColor: data.bookingColor ?? null,
           bookingDurationMin: data.bookingDurationMin ?? null,
@@ -1472,6 +1493,9 @@ export const updateInventoryItem = createServerFn({ method: 'POST' })
         // user might have toggled this and we mustn't undo it).
         ...(updates.isSellable !== undefined
           ? { isSellable: updates.isSellable }
+          : {}),
+        ...(updates.trackStock !== undefined
+          ? { trackStock: updates.trackStock }
           : {}),
         ...(updates.isBookable !== undefined
           ? { isBookable: updates.isBookable }
@@ -2449,6 +2473,10 @@ export const getStockAdjustmentData = createServerFn({ method: 'POST' })
               // Recipe-backed items have no own stock — sale-time BOM
               // walker deducts ingredients instead.
               isNull(inventoryItems.linkedHppProductId),
+              // Consignment items have no own stock either — the supplier
+              // holds it. Counting them in an opname would invent a
+              // figure this business has no standing to record.
+              eq(inventoryItems.trackStock, true),
             ),
           )
           .orderBy(inventoryItems.name)

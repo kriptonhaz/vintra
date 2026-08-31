@@ -619,6 +619,7 @@ function CashierPage() {
                 // refetched between the two adds.
                 stockInBase: stockCap,
                 recipeBacked: input.product.recipeBacked ?? false,
+                trackStock: input.product.trackStock ?? true,
               }
             : l,
         )
@@ -642,6 +643,7 @@ function CashierPage() {
           tiers: input.tiers,
           stockInBase: stockCap,
           recipeBacked: input.product.recipeBacked ?? false,
+          trackStock: input.product.trackStock ?? true,
         },
       ]
     })
@@ -845,6 +847,7 @@ function CashierPage() {
           tiers: unit.tiers,
           stockInBase: p.stockInBase,
           recipeBacked: p.recipeBacked ?? false,
+          trackStock: p.trackStock ?? true,
         })
       }
     }

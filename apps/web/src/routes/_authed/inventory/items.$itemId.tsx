@@ -43,7 +43,7 @@ import { inventoryMargin } from '@/lib/hpp-calculator'
 import { MarginPill } from '@/components/inventory/margin-pill'
 import { ModuleBreadcrumb } from '@/components/layout/module-breadcrumb'
 import { cn, formatDate, formatNumberID } from '@/lib/utils' // JUR-137
-import { HppLinkPicker, SellableToggle, PrepModeToggle, BookingFields, OnlineFields } from './items.index'
+import { HppLinkPicker, SellableToggle, TrackStockToggle, PrepModeToggle, BookingFields, OnlineFields } from './items.index'
 import { getPrepStatus } from '@/server/functions/pos-prep'
 import { PrepBatchSheet } from '@/components/pos/prep-batch-sheet'
 
@@ -74,6 +74,7 @@ const editItemSchema = z.object({
   autoSyncHppCost: z.boolean().optional(),
   /** "Tampilkan di POS" — Case 2 toggle. */
   isSellable: z.boolean().optional(),
+  trackStock: z.boolean().optional(),
   /** JUR-183 booking fields. */
   isBookable: z.boolean().optional(),
   bookingColor: z.string().max(20).nullable().optional(),
@@ -598,6 +599,7 @@ function EditItemForm({
       linkedHppProductId: item.linkedHppProductId ?? '',
       autoSyncHppCost: item.autoSyncHppCost ?? true,
       isSellable: item.isSellable ?? true,
+      trackStock: item.trackStock ?? true,
       isBookable: item.isBookable ?? false,
       bookingColor: item.bookingColor ?? null,
       bookingDurationMin: item.bookingDurationMin ?? null,
@@ -684,6 +686,7 @@ function EditItemForm({
               ? values.linkedHppProductId || null
               : null,
           isSellable: values.isSellable ?? true,
+          trackStock: values.trackStock ?? true,
           isBookable: values.isBookable ?? false,
           bookingColor: values.bookingColor ?? null,
           bookingDurationMin: values.bookingDurationMin ?? null,
@@ -899,6 +902,7 @@ function EditItemForm({
         )}
 
         <SellableToggle control={form.control} />
+        <TrackStockToggle control={form.control} />
         <BookingFields control={form.control} />
         <OnlineFields control={form.control} itemId={item.id} />
         {linkSource === 'product' && (

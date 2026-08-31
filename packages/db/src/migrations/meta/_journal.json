@@ -1037,6 +1037,13 @@
       "when": 1787832000000,
       "tag": "0147_pos_promo_code_field_toggle",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1788523200000,
+      "tag": "0148_inventory_track_stock",
+      "breakpoints": true
     }
   ]
 }
