@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { getRequest, setCookie } from '@tanstack/react-start/server'
+import { redirect } from '@tanstack/react-router'
 import { db } from '@vintra/db'
 import { startScheduler } from '../scheduler'
 import { refreshSessionCoalesced } from '../lib/refresh-session'
@@ -25,7 +26,7 @@ import {
   platformAdmins,
   activeImpersonations,
 } from '@vintra/db/schema'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 function getSupabaseServer() {
   return createClient(
@@ -212,6 +213,72 @@ async function getImpersonationOverride(userId: string): Promise<{
   }
 }
 
+/**
+ * Which membership a session resolves to when the user belongs to more
+ * than one tenant: a tenant they OWN first, oldest membership as the
+ * tie-break.
+ *
+ * Owner-first rather than plain oldest, because the two differ exactly
+ * where it hurts — someone invited to an employer's shop before opening
+ * their own would otherwise be pinned to the employer's tenant forever.
+ * The tie-break keeps the single-membership majority on precisely the
+ * row they resolved to before.
+ *
+ * Exported because `getCurrentUser` has to resolve the SAME row. It ran
+ * its own `.limit(1)` with no ordering at all, so for a user with two
+ * memberships Postgres was free to hand the two queries different rows:
+ * the page rendered as one tenant while every server function
+ * authorised against another.
+ *
+ * Any new tenant-resolution path must reuse this rather than write its
+ * own ordering.
+ */
+export function primaryMembershipOrder(userId: string) {
+  return [
+    sql`(${tenants.ownerId} = ${userId}) DESC`,
+    tenantMembers.createdAt,
+  ] as const
+}
+
+/**
+ * Path prefix of the mobile RPC bridge (`routes/api.mobile.$fn.ts`).
+ *
+ * That bridge turns a thrown error into JSON by string-matching its
+ * message — `inferStatus` answers 401 only when the message contains
+ * "unauthorized", and that 401 is the signal the app's re-login flow
+ * waits for. A redirect object carries no `.message`, so it would be
+ * reported as a generic 500 and the app would show a server error
+ * instead of logging back in.
+ */
+const MOBILE_BRIDGE_PREFIX = '/api/mobile/'
+
+/**
+ * End an unauthenticated request in whichever way the caller can act on.
+ *
+ * Web gets a redirect to the login page. It used to get
+ * `new Error('Unauthorized')`, and because route loaders call server
+ * functions that run this, a merely *expired* session rendered the
+ * router's error boundary — a page that says something broke — rather
+ * than asking the user to sign in again. `refreshSessionCoalesced`
+ * makes losing the refresh-rotation race rarer than it would otherwise
+ * be, but it does not make it impossible, and every loss took a working
+ * account to a screen that looked like a fault.
+ *
+ * The server-fn transport runs `parseRedirect()` over a thrown error and
+ * rethrows it, so this reaches the router as a real navigation.
+ *
+ * The mobile bridge keeps the Error: see MOBILE_BRIDGE_PREFIX.
+ *
+ * Declared as `never` so call sites read as terminal without a
+ * following `throw` — this function always throws.
+ */
+function failUnauthenticated(reqPath: string): never {
+  if (reqPath.startsWith(MOBILE_BRIDGE_PREFIX)) {
+    throw new Error('Unauthorized')
+  }
+  throw redirect({ to: '/auth/login' })
+}
+
 export async function requireAuth(): Promise<AuthContext> {
   const request = getRequest()
   const token = extractToken(request)
@@ -233,7 +300,7 @@ export async function requireAuth(): Promise<AuthContext> {
     console.warn(
       `[auth] no access token cookie path=${reqPath} refresh_present=${refreshTokenPresent}`,
     )
-    throw new Error('Unauthorized')
+    failUnauthenticated(reqPath)
   }
 
   const supabase = getSupabaseServer()
@@ -285,7 +352,7 @@ export async function requireAuth(): Promise<AuthContext> {
   }
 
   if (!user) {
-    throw new Error('Unauthorized')
+    failUnauthenticated(reqPath)
   }
 
   // Find tenant membership for this user. memberId is needed for the
@@ -297,10 +364,11 @@ export async function requireAuth(): Promise<AuthContext> {
   //      multi-tenant path), look up THAT specific membership. Forged
   //      headers for tenants the user doesn't belong to are rejected
   //      below as NoTenant.
-  //   2. Otherwise fall back to oldest membership (web path; one
-  //      tenant per owner since migration 0069, but earlier races
-  //      left some users with multiple — pinning to OLDEST keeps
-  //      behavior stable + matches intuition "your original account").
+  //   2. Otherwise resolve via `primaryMembershipOrder` (web path):
+  //      a tenant the user OWNS first, oldest membership as the
+  //      tie-break. One tenant per owner since migration 0069, but
+  //      invites still give a user memberships in tenants they don't
+  //      own, and their own shop is the one they mean.
   const requestedTenantId = extractRequestedTenantId(request)
   const membership = await (requestedTenantId
     ? db
@@ -326,8 +394,9 @@ export async function requireAuth(): Promise<AuthContext> {
           roleId: tenantMembers.roleId,
         })
         .from(tenantMembers)
+        .innerJoin(tenants, eq(tenants.id, tenantMembers.tenantId))
         .where(eq(tenantMembers.userId, user.id))
-        .orderBy(tenantMembers.createdAt)
+        .orderBy(...primaryMembershipOrder(user.id))
         .limit(1))
 
   // Check for active impersonation override (platform admins only).

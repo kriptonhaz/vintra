@@ -150,12 +150,14 @@ async function getUserInfo(
 
 /**
  * Reject if a Supabase user is already attached to any tenant — either
- * as a `tenant_members` row OR as a `tenants.owner_id`. Protects against
- * the silent failure where a user invited to a second tenant would log in
- * and only see one (random) tenant because getCurrentUser does a
- * `.limit(1)` without an explicit tenant selector.
+ * as a `tenant_members` row OR as a `tenants.owner_id`.
  *
- * We can relax this once a real tenant-switcher UI exists.
+ * Tenant resolution now picks deterministically (an owned tenant first,
+ * oldest membership as the tie-break — see `primaryMembershipOrder`), so
+ * a second membership no longer lands the user in a RANDOM tenant. It
+ * still lands them in only ONE, silently, and web has no tenant
+ * switcher: someone added here would simply never see this shop. So the
+ * guard stays until that switcher exists.
  */
 async function assertUserNotAttachedElsewhere(userId: string) {
   const [existingMembership] = await db

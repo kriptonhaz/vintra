@@ -36,7 +36,11 @@ import {
   marketingAgents,
 } from '@vintra/db/schema'
 import { eq, and, sql } from 'drizzle-orm'
-import { requireAuth, resolveRoleAndPermissions } from '../middleware/auth'
+import {
+  requireAuth,
+  resolveRoleAndPermissions,
+  primaryMembershipOrder,
+} from '../middleware/auth'
 import { refreshSessionCoalesced } from '../lib/refresh-session'
 import {
   sendEmail,
@@ -127,7 +131,13 @@ export const getCurrentUser = createServerFn().handler(async () => {
     return null
   }
 
-  // Get tenant info
+  // Get tenant info.
+  //
+  // MUST resolve the same row requireAuth does, via the shared ordering
+  // — this query previously had none at all, so for a user with two
+  // memberships Postgres was free to pick a different row here than the
+  // one every server function authorises against. The page then renders
+  // as one tenant while the data comes from another.
   const membership = await db
     .select({
       tenantId: tenantMembers.tenantId,
@@ -136,7 +146,9 @@ export const getCurrentUser = createServerFn().handler(async () => {
       aiEnabled: tenantMembers.aiEnabled,
     })
     .from(tenantMembers)
+    .innerJoin(tenants, eq(tenants.id, tenantMembers.tenantId))
     .where(eq(tenantMembers.userId, user.id))
+    .orderBy(...primaryMembershipOrder(user.id))
     .limit(1)
 
   let tenantInfo = null
