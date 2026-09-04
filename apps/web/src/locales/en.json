@@ -1426,7 +1426,10 @@
     "accessAtLeastOne": "Pick at least 1 branch or tick \"All branches\"",
     "accessOwnerAlways": "Owners always have access to all branches",
     "mainBranchBadge": "Main",
-    "unknownBranch": "(branch not found)"
+    "unknownBranch": "(branch not found)",
+    "existingTenantTitle": "This person already works at another business",
+    "existingTenantBody": "This email is already registered as {{list}}. You can still add them, and we will let them know. Continue?",
+    "existingTenantConfirm": "Yes, add them"
   },
   "account": {
     "title": "My Account",
@@ -2582,7 +2585,11 @@
     "callback": {
       "processing": "Processing sign-in...",
       "errorGoogleFailed": "Google sign-in failed. Please try again.",
-      "backToLogin": "Back to sign in"
+      "backToLogin": "Back to sign in",
+      "alreadyMemberTitle": "This account already has a business",
+      "alreadyMemberBody": "Your email is already registered as {{role}} at {{tenant}}, so we did not create a new business for this account.",
+      "alreadyMemberHint": "Want a separate business? Sign up with a different email, or contact your business owner.",
+      "alreadyMemberCta": "Continue to {{tenant}}"
     }
   },
   "help": {

@@ -10,14 +10,19 @@ import {
   tenants,
   waInstances,
 } from '@vintra/db/schema'
-import { eq, and, or, sql, desc, inArray, isNull } from 'drizzle-orm'
+import { eq, ne, and, or, sql, desc, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import {
   requireAuth,
   requirePermission,
   type AuthContext,
 } from '../middleware/auth'
-import { normalizeIDPhone, coerceStorablePhone } from '@vintra/shared'
+import {
+  normalizeIDPhone,
+  coerceStorablePhone,
+  NOTIFICATION_TYPES,
+} from '@vintra/shared'
+import { createNotification } from '../notifications'
 import {
   uploadTenantMemberPhoto,
   getTenantMemberPhotoSignedUrl,
@@ -243,7 +248,81 @@ const inviteSchema = z.object({
   roleId: z.string().uuid('Role tidak valid'),
   ...profileFieldsSchema,
   branches: branchAssignmentSchema,
+  /**
+   * Set once the caller has been shown, and accepted, the "this person
+   * already works at {tenant}" warning. Absent/false makes the invite
+   * fail rather than silently handing someone a second membership.
+   *
+   * The web sheet gets the list from `checkInviteEmailMemberships`
+   * first, so it can name the tenants in its dialog. Callers that skip
+   * the pre-check (the mobile bridge does, for now) just hit the error
+   * and must resend with the flag.
+   */
+  confirmExistingMemberships: z.boolean().optional().default(false),
 })
+
+/**
+ * Memberships this user already holds in OTHER tenants.
+ *
+ * Used twice: to populate the confirmation dialog, and to decide
+ * whether the invited person gets a heads-up notification. Returns []
+ * for the overwhelmingly common single-tenant case, so both callers can
+ * treat "empty" as "nothing special about this invite".
+ */
+async function findOtherTenantMemberships(
+  userId: string,
+  excludeTenantId: string,
+): Promise<Array<{ tenantName: string; roleLabel: string }>> {
+  const rows = await db
+    .select({
+      tenantName: tenants.businessName,
+      roleKey: tenantMembers.role,
+      roleLabel: roles.label,
+    })
+    .from(tenantMembers)
+    .innerJoin(tenants, eq(tenants.id, tenantMembers.tenantId))
+    .leftJoin(roles, eq(roles.id, tenantMembers.roleId))
+    .where(
+      and(
+        eq(tenantMembers.userId, userId),
+        ne(tenantMembers.tenantId, excludeTenantId),
+      ),
+    )
+
+  // roleId is nullable on legacy rows — fall back to the text key so
+  // the dialog never renders an empty role.
+  return rows.map((r) => ({
+    tenantName: r.tenantName,
+    roleLabel: r.roleLabel ?? r.roleKey,
+  }))
+}
+
+/**
+ * Pre-flight for the invite sheet: does this email already belong to
+ * someone who works at another tenant?
+ *
+ * Returns `{ exists: false }` when the address has no account at all —
+ * the ordinary "brand new hire" case, no warning needed.
+ */
+export const checkInviteEmailMemberships = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ email: z.string().email('Email tidak valid') }))
+  .handler(async ({ data }) => {
+    // Same permission the invite itself needs. Without this the fn
+    // would let any signed-in user probe which businesses a given email
+    // address works for.
+    const auth = await requirePermission('members.manage')
+
+    const user = await findUserByEmail(data.email)
+    if (!user) return { exists: false as const, otherMemberships: [] }
+
+    return {
+      exists: true as const,
+      otherMemberships: await findOtherTenantMemberships(
+        user.id,
+        auth.tenantId,
+      ),
+    }
+  })
 
 /**
  * JUR-135: guard against an admin smuggling a branch_id from a
@@ -387,6 +466,31 @@ export const inviteTenantMember = createServerFn({ method: 'POST' })
       throw new Error('Pengguna ini sudah menjadi anggota tenant')
     }
 
+    // Adding someone who already works elsewhere needs an explicit yes.
+    //
+    // Nothing here is forbidden — one person can genuinely work at two
+    // businesses. But web has no tenant switcher, and tenant resolution
+    // puts an owned tenant ahead of every other membership, so the one
+    // just granted can be silently unreachable for the person who
+    // gained it. An admin who knows that is fine; an admin who doesn't
+    // has just created a support ticket. Make them look.
+    //
+    // Email path only: the phone-only invite below derives a synthetic
+    // `wa-{slug}-{phone}` address and `tenants.slug` is unique, so that
+    // user can never already belong to another tenant.
+    const otherMemberships = await findOtherTenantMemberships(
+      user.id,
+      auth.tenantId,
+    )
+    if (otherMemberships.length > 0 && !data.confirmExistingMemberships) {
+      const where = otherMemberships
+        .map((m) => `${m.roleLabel} di ${m.tenantName}`)
+        .join(', ')
+      throw new Error(
+        `Pengguna ini sudah terdaftar sebagai ${where}. Konfirmasi dulu sebelum menambahkannya ke usaha ini.`,
+      )
+    }
+
     const [member] = await db
       .insert(tenantMembers)
       .values({
@@ -431,6 +535,36 @@ export const inviteTenantMember = createServerFn({ method: 'POST' })
       } catch (err) {
         // Non-fatal — member exists, just no photo.
         console.error('[inviteTenantMember] photo upload failed:', err)
+      }
+    }
+
+    // Tell the new member they now belong to a second business.
+    //
+    // Only when they already had a membership elsewhere: a first-time
+    // hire has nothing to disambiguate, and would just get noise on an
+    // account they have not even opened yet. Never let a notification
+    // failure undo a successful invite — createNotification swallows its
+    // own errors, and the tenant lookup is guarded for the same reason.
+    if (otherMemberships.length > 0) {
+      try {
+        const [thisTenant] = await db
+          .select({ businessName: tenants.businessName })
+          .from(tenants)
+          .where(eq(tenants.id, auth.tenantId))
+          .limit(1)
+        if (thisTenant) {
+          await createNotification({
+            userId: user.id,
+            tenantId: auth.tenantId,
+            type: NOTIFICATION_TYPES.memberAddedToTenant,
+            title: 'Anda ditambahkan ke usaha baru',
+            body: `Anda kini terdaftar sebagai ${role.label} di ${thisTenant.businessName}, selain ${otherMemberships
+              .map((m) => m.tenantName)
+              .join(', ')}.`,
+          })
+        }
+      } catch (err) {
+        console.error('[inviteTenantMember] notify failed:', err)
       }
     }
 

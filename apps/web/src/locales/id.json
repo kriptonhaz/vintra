@@ -1426,7 +1426,10 @@
     "accessAtLeastOne": "Pilih minimal 1 cabang atau centang \"Semua cabang\"",
     "accessOwnerAlways": "Pemilik selalu punya akses ke semua cabang",
     "mainBranchBadge": "Utama",
-    "unknownBranch": "(cabang tidak ditemukan)"
+    "unknownBranch": "(cabang tidak ditemukan)",
+    "existingTenantTitle": "Pengguna ini sudah bekerja di usaha lain",
+    "existingTenantBody": "Email ini sudah terdaftar sebagai {{list}}. Dia tetap bisa ditambahkan, dan akan kami beri tahu. Lanjutkan?",
+    "existingTenantConfirm": "Ya, tetap tambahkan"
   },
   "account": {
     "title": "Akun Saya",
@@ -2582,7 +2585,11 @@
     "callback": {
       "processing": "Memproses login...",
       "errorGoogleFailed": "Gagal masuk dengan Google. Silakan coba lagi.",
-      "backToLogin": "Kembali ke halaman login"
+      "backToLogin": "Kembali ke halaman login",
+      "alreadyMemberTitle": "Akun ini sudah punya usaha",
+      "alreadyMemberBody": "Email Anda sudah terdaftar sebagai {{role}} di {{tenant}}. Karena itu kami tidak membuat usaha baru untuk akun ini.",
+      "alreadyMemberHint": "Ingin membuka usaha terpisah? Daftar dengan email lain, atau hubungi pemilik usaha Anda.",
+      "alreadyMemberCta": "Lanjut masuk ke {{tenant}}"
     }
   },
   "help": {

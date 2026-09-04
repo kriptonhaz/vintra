@@ -995,25 +995,66 @@ export const ensureTenantForOAuth = createServerFn({ method: 'POST' })
       throw new Error('Unauthorized')
     }
 
-    // Check if user already has a tenant
-    const existingMembership = await db
-      .select()
+    // Check if user already has a tenant.
+    //
+    // This has always skipped creating a second tenant, but it did so
+    // silently — the caller got a bare `{ created: false }` and pushed
+    // on to /dashboard. Someone who pressed "Daftar" expecting a fresh
+    // business instead landed inside their employer's shop with no
+    // explanation. Carry back WHICH tenant and WHAT role so the callback
+    // can say so plainly. `UNIQUE(tenants.owner_id)` means a second
+    // owned tenant was never possible anyway.
+    const [existingMembership] = await db
+      .select({
+        tenantName: tenants.businessName,
+        roleKey: tenantMembers.role,
+        roleLabel: roles.label,
+      })
       .from(tenantMembers)
+      .innerJoin(tenants, eq(tenants.id, tenantMembers.tenantId))
+      .leftJoin(roles, eq(roles.id, tenantMembers.roleId))
       .where(eq(tenantMembers.userId, user.id))
+      // Same ordering as primaryMembershipOrder — the notice has to name
+      // the tenant they will actually land in, not an arbitrary one.
+      .orderBy(
+        sql`(${tenants.ownerId} = ${user.id}) DESC`,
+        tenantMembers.createdAt,
+      )
       .limit(1)
 
-    if (existingMembership.length > 0) {
-      return { created: false }
+    if (existingMembership) {
+      return {
+        created: false,
+        existingMembership: {
+          tenantName: existingMembership.tenantName,
+          // roleId is nullable on legacy rows; fall back to the text key.
+          roleLabel: existingMembership.roleLabel ?? existingMembership.roleKey,
+        },
+      }
     }
 
-    const existingOwned = await db
-      .select()
+    const [existingOwned] = await db
+      .select({ businessName: tenants.businessName })
       .from(tenants)
       .where(eq(tenants.ownerId, user.id))
       .limit(1)
 
-    if (existingOwned.length > 0) {
-      return { created: false }
+    if (existingOwned) {
+      // Legacy safety net: owning a tenant without the matching
+      // tenant_members row. Take the label from the roles table rather
+      // than hardcoding it, so it tracks any rename there.
+      const [ownerRole] = await db
+        .select({ label: roles.label })
+        .from(roles)
+        .where(eq(roles.key, 'owner'))
+        .limit(1)
+      return {
+        created: false,
+        existingMembership: {
+          tenantName: existingOwned.businessName,
+          roleLabel: ownerRole?.label ?? 'Pemilik',
+        },
+      }
     }
 
     // Create tenant using user's name or email
@@ -1056,11 +1097,11 @@ export const ensureTenantForOAuth = createServerFn({ method: 'POST' })
       // portable check is the message string.
       const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('tenants_owner_id_key') || msg.includes('23505')) {
-        return { created: false }
+        return { created: false, existingMembership: null }
       }
       throw err
     }
-    if (!tenant) return { created: false }
+    if (!tenant) return { created: false, existingMembership: null }
 
     const ownerRoleIdOAuth = await getOwnerRoleId()
     await db.insert(tenantMembers).values({
@@ -1084,7 +1125,7 @@ export const ensureTenantForOAuth = createServerFn({ method: 'POST' })
       rawCode: data?.referralCode,
     })
 
-    return { created: true }
+    return { created: true, existingMembership: null }
   })
 
 export const completeOnboarding = createServerFn({ method: 'POST' })

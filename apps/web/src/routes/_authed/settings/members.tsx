@@ -34,6 +34,7 @@ import {
   getTenantSlugForWaLogin,
   getWaLoginAvailability,
   invitePhoneOnlyTenantMember,
+  checkInviteEmailMemberships,
 } from '@/server/functions/tenant-members'
 import {
   isAttendanceManageable,
@@ -783,6 +784,18 @@ function InviteSheet({
   // Once the member row is created we keep its id so a retry (e.g. the
   // HR upsert failed on a quota error) doesn't re-invite the member.
   const [createdMemberId, setCreatedMemberId] = useState<string | null>(null)
+  // Set when the pre-flight found this email already working somewhere
+  // else. Holds the submitted values so the dialog's "Ya, tetap
+  // tambahkan" can replay the exact same invite with the flag on.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    values: InviteForm
+    memberships: Array<{ tenantName: string; roleLabel: string }>
+  } | null>(null)
+  // The confirmed invite runs outside react-hook-form's handleSubmit, so
+  // formState.isSubmitting stays false for it. Track it here or the
+  // dialog button sits idle through the whole request and invites a
+  // second click.
+  const [confirmLoading, setConfirmLoading] = useState(false)
 
   // JUR-135: per the spec, pre-select the main branch when present
   // (falls back to first branch by createdAt order, which is already
@@ -830,6 +843,38 @@ function InviteSheet({
 
   async function onSubmit(values: InviteForm) {
     setServerError(null)
+
+    // Pre-flight: is this address already a member somewhere else?
+    //
+    // Only to populate the dialog — the server enforces the same rule
+    // and rejects an unconfirmed invite regardless, so a failure here
+    // costs nothing but a less specific error message. Skipped once the
+    // member row exists (a retry of the HR step, not a new invite) and
+    // for phone-only invites, whose synthetic address is unique per
+    // tenant and so can never belong to another one.
+    if (
+      !createdMemberId &&
+      values.inviteMode !== 'phone-only' &&
+      values.email
+    ) {
+      try {
+        const check = await checkInviteEmailMemberships({
+          data: { email: values.email },
+        })
+        if (check.otherMemberships.length > 0) {
+          setPendingConfirm({ values, memberships: check.otherMemberships })
+          return
+        }
+      } catch {
+        // Advisory only — fall through and let the server decide.
+      }
+    }
+
+    await runInvite(values, false)
+  }
+
+  async function runInvite(values: InviteForm, confirmedExisting: boolean) {
+    setServerError(null)
     try {
       const branchesArg =
         values.branchesMode === 'all'
@@ -866,6 +911,7 @@ function InviteSheet({
               jobTitle: values.jobTitle ?? null,
               photoDataUrl: photoDataUrl ?? null,
               branches: branchesArg,
+              confirmExistingMemberships: confirmedExisting,
             },
           })
           memberId = member.id
@@ -959,6 +1005,7 @@ function InviteSheet({
   }
 
   return (
+    <>
     <Sheet open={true} onClose={onClose}>
       <SheetHeader onClose={onClose}>
         <SheetTitle>{t('members.inviteSheetTitle')}</SheetTitle>
@@ -1156,6 +1203,35 @@ function InviteSheet({
         </div>
       </form>
     </Sheet>
+    <ConfirmDialog
+      open={pendingConfirm !== null}
+      title={t('members.existingTenantTitle')}
+      description={
+        pendingConfirm
+          ? t('members.existingTenantBody', {
+              list: pendingConfirm.memberships
+                .map((m) => `${m.roleLabel} di ${m.tenantName}`)
+                .join(', '),
+            })
+          : undefined
+      }
+      confirmText={t('members.existingTenantConfirm')}
+      cancelText={t('common.cancel')}
+      loading={confirmLoading}
+      onCancel={() => setPendingConfirm(null)}
+      onConfirm={async () => {
+        const pending = pendingConfirm
+        if (!pending) return
+        setConfirmLoading(true)
+        try {
+          await runInvite(pending.values, true)
+        } finally {
+          setConfirmLoading(false)
+          setPendingConfirm(null)
+        }
+      }}
+    />
+    </>
   )
 }
 

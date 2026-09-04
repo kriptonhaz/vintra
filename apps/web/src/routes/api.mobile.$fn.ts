@@ -1006,6 +1006,12 @@ const HANDLERS: Record<string, (data: unknown) => Promise<unknown>> = {
   listTenantMembers: async (data: any) =>
     await listTenantMembers({ data: data ?? {} }),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // NOTE: unchanged on purpose. `inviteTenantMember` now refuses to add
+  // someone who already works at another tenant unless the caller sends
+  // `confirmExistingMemberships: true`, and the app has no dialog to ask
+  // that yet. Until it does, those invites come back as an error naming
+  // the other business — which is the safe half of the behaviour. The
+  // overwhelmingly common single-tenant invite is unaffected.
   inviteTenantMember: async (data: any) =>
     await inviteTenantMember({ data }),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

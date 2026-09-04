@@ -19,6 +19,7 @@ import {
   readRefCookie,
   clearRefCookie,
 } from '@/lib/referral-cookie'
+import { markSignupIntent } from '@/lib/signup-intent-cookie'
 import registerHero from '@/assets/images/register-hero.png'
 import logoWordmark from '@/assets/images/logo-wordmark.png'
 import logoWordmarkWhite from '@/assets/images/logo-wordmark-white.png'
@@ -150,6 +151,11 @@ function RegisterPage() {
 
   async function handleGoogleRegister() {
     setServerError(null)
+    // Tell /auth/callback this round-trip started from "daftar", not
+    // "masuk" — the two are indistinguishable once Google redirects
+    // back. Only the register path shows the "already a member of
+    // {tenant}" notice.
+    markSignupIntent()
     const supabase = createBrowserSupabase()
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',

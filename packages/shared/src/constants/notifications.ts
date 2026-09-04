@@ -95,6 +95,19 @@ export const NOTIFICATION_TYPES = {
   // Comp grants (JUR-194) — a non-founder admin requested free access.
   compRequestPending: 'comp_request_pending',
 
+  /**
+   * Fires when someone is added to a tenant while they already belong
+   * to a different one. Being in two tenants is legitimate, but web has
+   * no tenant switcher yet, so the second membership is invisible to
+   * the person who gained it — they only notice when the app starts
+   * answering as a shop they didn't expect. Telling them at the moment
+   * it happens is the cheap half of the fix.
+   *
+   * Deliberately NOT sent for a first/only membership: that person has
+   * nothing to disambiguate.
+   */
+  memberAddedToTenant: 'member_added_to_tenant',
+
   // Feedback / support
   feedbackNewThread: 'feedback_new_thread',
   feedbackTenantReply: 'feedback_tenant_reply',
