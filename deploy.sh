@@ -158,11 +158,20 @@ remote_install_and_restart() {
     # warmup (typical startup is ~5s). Failing here exits the whole
     # script so we don't restart the second instance before the
     # first one's confirmed healthy — that would mean both down.
+    #
+    # ALWAYS restart via the ecosystem FILE, never \`pm2 restart <name>\`.
+    # Given a bare app name PM2 replays the config it stored in its own
+    # dump when the app was first started and ignores the file entirely,
+    # so a changed interpreter_args / max_memory_restart / env rsyncs to
+    # the box, shows up in git, and silently never takes effect. Passing
+    # the file — by absolute path through the release symlink, so it
+    # re-resolves after a rollback moves it — makes the deployed config
+    # the live one.
     restart_one() {
       local app="\$1"
       local port="\$2"
       echo "→ Restarting \$app (port \$port)..."
-      pm2 restart "\$app" --update-env
+      pm2 restart "$REMOTE_DIR/ecosystem.config.cjs" --only "\$app" --update-env
       for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
         if curl -sf -m 2 "http://127.0.0.1:\$port/" > /dev/null 2>&1; then
           echo "  ✓ \$app ready on :\$port (after \${i}s)"
@@ -202,8 +211,12 @@ remote_install_and_restart() {
       echo "  ↩ Rolling back to \$(basename "\$PREVIOUS_RELEASE")" >&2
       ln -sfn "\$PREVIOUS_RELEASE" "${REMOTE_DIR}.tmp"
       mv -Tf "${REMOTE_DIR}.tmp" "$REMOTE_DIR"
-      pm2 restart vintra-web-a --update-env || true
-      pm2 restart vintra-web-b --update-env || true
+      # Re-enter the symlink: \`cd\` resolved it to an inode before the
+      # swap above, so without this the shell is still sitting inside
+      # the release we are backing out of.
+      cd "$REMOTE_DIR"
+      pm2 restart "$REMOTE_DIR/ecosystem.config.cjs" --only vintra-web-a --update-env || true
+      pm2 restart "$REMOTE_DIR/ecosystem.config.cjs" --only vintra-web-b --update-env || true
       return 1
     }
 
@@ -229,7 +242,7 @@ remote_install_and_restart() {
       pm2 delete vintra-web > /dev/null 2>&1 || true
       pm2 delete vintra-web-a > /dev/null 2>&1 || true
       pm2 delete vintra-web-b > /dev/null 2>&1 || true
-      pm2 start ecosystem.config.cjs
+      pm2 start "$REMOTE_DIR/ecosystem.config.cjs"
     fi
     pm2 save
 
