@@ -24,6 +24,7 @@ import { ReportFilterBar } from '@/components/pos/reports/filter-bar'
 import { ReportTable, type ReportColumn } from '@/components/pos/reports/report-table'
 import { useReportFilters } from '@/components/pos/reports/use-report-filters'
 import { ExportMenu } from '@/components/pos/reports/export-menu'
+import { useToast } from '@/components/ui/toast'
 import {
   csvCell,
   downloadCsvBlob,
@@ -59,6 +60,8 @@ function PelangganPage() {
   const [debouncedSearch, setDebouncedSearch] = React.useState('')
   const [sortBy, setSortBy] = React.useState<SortBy>('totalSpend')
   const [page, setPage] = React.useState(1)
+  const [exporting, setExporting] = React.useState(false)
+  const { toast } = useToast()
 
   // Debounce the search box so typing doesn't fire a query per char.
   React.useEffect(() => {
@@ -123,6 +126,56 @@ function PelangganPage() {
   const totalCount = r?.totalCount ?? 0
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
+  /**
+   * Re-fetch the WHOLE result set before writing the file.
+   *
+   * The table shows 25 rows at a time, and exporting `rows` gave the
+   * owner whatever page was on screen — nothing in the file said so, so
+   * 25 customers read as the entire list. Search and sort carry over
+   * verbatim: an export must contain exactly what the screen claims to
+   * show, just all of it.
+   */
+  async function runExport(
+    write: (
+      rows: CustomerReportRow[],
+      anonymous: { count: number; total: number },
+      from: string,
+      to: string,
+    ) => void,
+  ) {
+    setExporting(true)
+    try {
+      const full = await getPOSCustomersReport({
+        data: {
+          branchId: branchId || undefined,
+          from,
+          to,
+          search: debouncedSearch || undefined,
+          sortBy,
+          sortDir: 'desc',
+          all: true,
+        },
+      })
+      write(full.rows, full.anonymousSummary, from, to)
+      if (full.truncated) {
+        toast({
+          title: 'Sebagian data tidak ikut',
+          description: `Laporan ini punya ${full.totalCount} baris; file berisi ${full.rows.length} teratas. Persempit rentang tanggal atau pakai pencarian untuk mengunduh sisanya.`,
+          variant: 'error',
+        })
+      }
+    } catch (err) {
+      toast({
+        title: 'Gagal menyiapkan file',
+        description:
+          err instanceof Error ? err.message : 'Coba lagi sebentar lagi.',
+        variant: 'error',
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const columns: ReportColumn<CustomerReportRow>[] = [
     {
       key: 'name',
@@ -185,9 +238,10 @@ function PelangganPage() {
         {r && (
           <ExportMenu
             disabled={rows.length === 0}
-            onXlsx={() => exportXlsx(rows, r.anonymousSummary, from, to)}
-            onCsv={() => exportCsv(rows, r.anonymousSummary, from, to)}
-            onPdf={() => exportPdf(rows, r.anonymousSummary, from, to)}
+            loading={exporting}
+            onXlsx={() => void runExport(exportXlsx)}
+            onCsv={() => void runExport(exportCsv)}
+            onPdf={() => void runExport(exportPdf)}
           />
         )}
       </div>

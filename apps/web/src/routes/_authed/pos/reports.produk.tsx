@@ -20,6 +20,7 @@ import { ReportFilterBar } from '@/components/pos/reports/filter-bar'
 import { ReportTable, type ReportColumn } from '@/components/pos/reports/report-table'
 import { useReportFilters } from '@/components/pos/reports/use-report-filters'
 import { ExportMenu } from '@/components/pos/reports/export-menu'
+import { useToast } from '@/components/ui/toast'
 import {
   csvCell,
   downloadCsvBlob,
@@ -56,6 +57,8 @@ function ProdukPage() {
   const [categoryId, setCategoryId] = React.useState('')
   const [page, setPage] = React.useState(1)
   const [sortBy, setSortBy] = React.useState<SortBy>('revenue')
+  const [exporting, setExporting] = React.useState(false)
+  const { toast } = useToast()
 
   // Reset to page 1 whenever the filter scope changes — otherwise a
   // page-5 cursor on a fresh date range usually points past the end.
@@ -122,6 +125,56 @@ function ProdukPage() {
   const rows = r?.rows ?? []
   const totalCount = r?.totalCount ?? 0
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+
+  /**
+   * Re-fetch the WHOLE result set before writing the file.
+   *
+   * The table shows 25 rows at a time, and exporting `rows` gave the
+   * owner whatever page was on screen — a 100-product catalog meant
+   * four downloads to stitch together by hand, with nothing in the file
+   * saying it was partial. The filters carry over verbatim: an export
+   * must contain exactly what the screen claims to show, just all of it.
+   */
+  async function runExport(
+    write: (
+      rows: ProductReportRow[],
+      from: string,
+      to: string,
+      withProfit: boolean,
+    ) => void,
+  ) {
+    setExporting(true)
+    try {
+      const full = await getPOSSalesByProduct({
+        data: {
+          branchId: branchId || undefined,
+          categoryId: categoryId || undefined,
+          from,
+          to,
+          all: true,
+          sortBy,
+          sortDir: 'desc',
+        },
+      })
+      write(full.rows, from, to, canSeeProfit && full.canSeeProfit)
+      if (full.truncated) {
+        toast({
+          title: 'Sebagian data tidak ikut',
+          description: `Laporan ini punya ${full.totalCount} baris; file berisi ${full.rows.length} teratas. Persempit rentang tanggal atau filter kategori untuk mengunduh sisanya.`,
+          variant: 'error',
+        })
+      }
+    } catch (err) {
+      toast({
+        title: 'Gagal menyiapkan file',
+        description:
+          err instanceof Error ? err.message : 'Coba lagi sebentar lagi.',
+        variant: 'error',
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const columns: ReportColumn<ProductReportRow>[] = [
     {
@@ -221,9 +274,10 @@ function ProdukPage() {
         {r && (
           <ExportMenu
             disabled={rows.length === 0}
-            onXlsx={() => exportXlsx(rows, from, to, canSeeProfit && r.canSeeProfit)}
-            onCsv={() => exportCsv(rows, from, to, canSeeProfit && r.canSeeProfit)}
-            onPdf={() => exportPdf(rows, from, to, canSeeProfit && r.canSeeProfit)}
+            loading={exporting}
+            onXlsx={() => void runExport(exportXlsx)}
+            onCsv={() => void runExport(exportCsv)}
+            onPdf={() => void runExport(exportPdf)}
           />
         )}
       </div>

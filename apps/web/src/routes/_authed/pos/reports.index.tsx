@@ -23,11 +23,14 @@ import { ModuleBreadcrumb } from '@/components/layout/module-breadcrumb'
 import { ReportFilterBar } from '@/components/pos/reports/filter-bar'
 import { useReportFilters } from '@/components/pos/reports/use-report-filters'
 import { ExportMenu } from '@/components/pos/reports/export-menu'
-import { downloadXlsx } from '@/components/pos/reports/export-helpers'
+import {
+  downloadXlsx,
+  pdfFooter,
+} from '@/components/pos/reports/export-helpers'
 import { useToast } from '@/components/ui/toast'
 import { posTierLimits, type POSPaymentMethod } from '@vintra/shared'
 import { formatRupiah } from '@/lib/currency'
-import { cn, formatDate, formatNumberID } from '@/lib/utils' // JUR-137
+import { cn, formatNumberID } from '@/lib/utils' // JUR-137
 import { usePermissions } from '@/hooks/use-permissions'
 
 export const Route = createFileRoute('/_authed/pos/reports/')({
@@ -678,13 +681,10 @@ function downloadPDF(r: ReportData, from: string, to: string, tenantName: string
     }
   }
 
-  doc.setFontSize(8)
-  doc.text(
-    `Dicetak ${formatDate(new Date(), 'dd MMM yyyy, HH:mm')} • Vintra`,
-    105,
-    287,
-    { align: 'center' },
-  )
+  // Shared helper — footers every page, not just the last one. This
+  // report already spans several pages once a tenant has more than a
+  // handful of cashiers.
+  pdfFooter(doc)
 
   const dataUrl = doc.output('datauristring')
   const a = document.createElement('a')

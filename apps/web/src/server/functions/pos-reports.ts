@@ -150,12 +150,30 @@ export type ProductReportRow = {
   marginPct: number
 }
 
+/**
+ * Row ceiling for an export-mode call.
+ *
+ * `all: true` exists because the table paginates at 25 for the screen's
+ * sake while the export button handed back whatever page happened to be
+ * loaded — a tenant with 100 products downloaded four files and
+ * stitched them by hand. Unbounded would be worse though: these are
+ * grouped aggregates held in memory and serialized into a workbook in
+ * the browser. 10k covers every catalog and customer list by a wide
+ * margin, and anything past it comes back flagged `truncated` rather
+ * than silently dropped.
+ */
+export const EXPORT_ROW_CAP = 10_000
+
+/** Return every matching row in one call, ignoring page/pageSize. */
+const exportAllFlag = z.boolean().default(false)
+
 const productReportInput = baseRangeSchema.extend({
   // Filter to a single category (matches inventory_items.category_id).
   // Pass the literal string 'none' to surface uncategorised items.
   categoryId: z.string().uuid().optional(),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(1).max(100).default(25),
+  all: exportAllFlag,
   sortBy: z
     .enum(['revenue', 'qty', 'salesCount', 'margin', 'name'])
     .default('revenue'),
@@ -201,8 +219,8 @@ export const getPOSSalesByProduct = createServerFn({ method: 'POST' })
       }
     })()
     const sortDir = data.sortDir === 'asc' ? sql`ASC` : sql`DESC`
-    const limit = data.pageSize
-    const offset = (data.page - 1) * data.pageSize
+    const limit = data.all ? EXPORT_ROW_CAP : data.pageSize
+    const offset = data.all ? 0 : (data.page - 1) * data.pageSize
 
     // Wrap the GROUP BY in a CTE so we can both paginate AND get a
     // total count in one round-trip.
@@ -280,6 +298,8 @@ export const getPOSSalesByProduct = createServerFn({ method: 'POST' })
       canSeeProfit,
       page: data.page,
       pageSize: data.pageSize,
+      /** Export mode hit the cap — the caller must say so, not pretend. */
+      truncated: data.all && totalCount > EXPORT_ROW_CAP,
     }
   })
 
@@ -300,6 +320,7 @@ const customerReportInput = baseRangeSchema.extend({
   search: z.string().trim().max(120).optional(),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(1).max(100).default(25),
+  all: exportAllFlag,
   sortBy: z
     .enum(['totalSpend', 'salesCount', 'avgBasket', 'lastVisit', 'name'])
     .default('totalSpend'),
@@ -341,8 +362,8 @@ export const getPOSCustomersReport = createServerFn({ method: 'POST' })
       }
     })()
     const sortDir = data.sortDir === 'asc' ? sql`ASC` : sql`DESC`
-    const limit = data.pageSize
-    const offset = (data.page - 1) * data.pageSize
+    const limit = data.all ? EXPORT_ROW_CAP : data.pageSize
+    const offset = data.all ? 0 : (data.page - 1) * data.pageSize
 
     const rows = await db.execute<{
       customer_id: string
@@ -424,6 +445,8 @@ export const getPOSCustomersReport = createServerFn({ method: 'POST' })
       anonymousSummary,
       page: data.page,
       pageSize: data.pageSize,
+      /** Export mode hit the cap — the caller must say so, not pretend. */
+      truncated: data.all && totalCount > EXPORT_ROW_CAP,
     }
   })
 

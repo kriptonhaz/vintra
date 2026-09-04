@@ -32,14 +32,33 @@ export function pdfHeader(
   return y + 4
 }
 
+/**
+ * Stamp the "Dicetak …" footer and a page counter on EVERY page.
+ *
+ * Callers draw rows top-to-bottom and `addPage()` when they run past
+ * the margin, then call this once at the end — which used to footer
+ * only whichever page the cursor happened to be sitting on. That was
+ * invisible while these reports fitted on one page; now that an export
+ * carries the whole result set instead of the 25 rows on screen, a
+ * Produk PDF can run to dozens, and a reader needs to know both where a
+ * loose page came from and whether any are missing.
+ */
 export function pdfFooter(doc: jsPDF) {
-  doc.setFontSize(8)
-  doc.text(
-    `Dicetak ${formatDate(new Date(), 'dd MMM yyyy, HH:mm')} • Vintra`,
-    105,
-    287,
-    { align: 'center' },
-  )
+  const printedAt = formatDate(new Date(), 'dd MMM yyyy, HH:mm')
+  const pageCount = doc.getNumberOfPages()
+  const current = doc.getCurrentPageInfo().pageNumber
+  for (let page = 1; page <= pageCount; page++) {
+    doc.setPage(page)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.text(`Dicetak ${printedAt} • Vintra`, 105, 287, { align: 'center' })
+    if (pageCount > 1) {
+      doc.text(`Hal ${page} / ${pageCount}`, 190, 287, { align: 'right' })
+    }
+  }
+  // Leave the cursor where the caller left it — this helper is not the
+  // last thing every caller does.
+  doc.setPage(current)
 }
 
 /** Trigger a browser download of a CSV blob. Quoting + escaping is
