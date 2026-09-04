@@ -1580,6 +1580,7 @@
     "fieldLinkHppMaterial": "Link to HPP Material",
     "autoSyncHppLabel": "Auto-sync price from HPP",
     "autoSyncHppHint": "When on: stock-in updates HPP price, and HPP price changes can be applied to this item with one click. Turn off to keep this item's cost independent of HPP.",
+    "autoSyncHppRecipeHint": "When on: this item's cost follows the recipe's latest HPP every time an ingredient price changes. Turn off if you set this item's cost yourself.",
     "applyHppTitle": "HPP price for \"{{material}}\" just changed",
     "applyHppBody": "New price: {{price}}/{{unit}}. {{count}} linked inventory items are ready to update.",
     "applyHppSkipped": "{{count}} skipped (auto-sync off)",

@@ -1580,6 +1580,7 @@
     "fieldLinkHppMaterial": "Tautkan ke Bahan HPP",
     "autoSyncHppLabel": "Sinkron otomatis harga dari HPP",
     "autoSyncHppHint": "Saat aktif: stock-in update harga HPP, dan ubah harga HPP bisa diterapkan ke item ini sekali klik. Matikan kalau Anda mau jaga harga inventory terpisah dari HPP.",
+    "autoSyncHppRecipeHint": "Saat aktif: modal item ini mengikuti HPP resep terbaru setiap kali harga bahan berubah. Matikan kalau modal item ini Anda tetapkan sendiri.",
     "applyHppTitle": "Harga HPP \"{{material}}\" baru saja berubah",
     "applyHppBody": "Harga baru: {{price}}/{{unit}}. {{count}} item inventory tertaut dan siap diperbarui.",
     "applyHppSkipped": "{{count}} item dilewati karena auto-sync dimatikan",

@@ -18,6 +18,7 @@ import { db } from '@vintra/db'
 import { products, productMaterials, materials, hppPriceHistory } from '@vintra/db/schema'
 import { and, eq } from 'drizzle-orm'
 import { computeHpp, type HppComputeResult } from './hpp-engine'
+import { syncInventoryCostFromProducts } from './hpp-cost-sync'
 
 /** Root client, or an open transaction. */
 export type DbExecutor =
@@ -47,6 +48,12 @@ export interface RecalcResult {
   /** Left alone because they sit in a recipe cycle. */
   unresolved: string[]
   maxDepth: number
+  /**
+   * How many inventory items had their `cost_price` follow the products
+   * above. Only recipe-linked items with `auto_sync_hpp_cost` on move —
+   * see `hpp-cost-sync.ts`.
+   */
+  costSyncedItems: number
 }
 
 /**
@@ -163,6 +170,9 @@ export async function previewMaterialPriceChange(
     unchanged,
     unresolved: hypothetical.unresolved,
     maxDepth: hypothetical.maxDepth,
+    // A preview writes nothing, so nothing has followed it into the
+    // item list. The real number lands when the edit is saved.
+    costSyncedItems: 0,
   }
   return { ...summarizeImpact(result), products: changed }
 }
@@ -244,11 +254,26 @@ export async function recalcTenantHpp(
     )
   }
 
+  // The item list's "Modal" follows the recipe cost we just wrote. Same
+  // transaction and the same reasoning as the history rows above: an HPP
+  // move that committed without reaching the item list is precisely the
+  // drift this cascade exists to remove. Scoped to the products that
+  // actually moved, so items nothing happened to keep their updated_at.
+  const costSync =
+    changed.length > 0
+      ? await syncInventoryCostFromProducts(
+          tenantId,
+          exec,
+          changed.map((c) => c.productId),
+        )
+      : { updated: [] }
+
   return {
     changed,
     unchanged,
     unresolved: graph.unresolved,
     maxDepth: graph.maxDepth,
+    costSyncedItems: costSync.updated.length,
   }
 }
 

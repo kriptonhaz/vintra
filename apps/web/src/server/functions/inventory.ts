@@ -41,6 +41,10 @@ import {
   POS_PRICE_READONLY_ERROR,
 } from '../lib/pos-price-sync'
 import {
+  syncInventoryCostFromMaterials,
+  syncInventoryCostFromProducts,
+} from '../lib/hpp-cost-sync'
+import {
   recalcTenantHpp,
   summarizeImpact,
   DANGER_MARGIN,
@@ -979,10 +983,12 @@ const itemInput = z.object({
   notes: z.string().max(1000).optional().nullable(),
   linkedHppMaterialId: z.string().uuid().optional().nullable(),
   linkedHppProductId: z.string().uuid().optional().nullable(),
-  /** Per-item override for the HPP price sync. Only meaningful when
-   *  linkedHppMaterialId is set; ignored otherwise. Defaults to true
-   *  in the DB so legacy callers that never pass this still get the
-   *  historical "always sync" behaviour. */
+  /** Per-item override for the HPP cost sync. Meaningful for BOTH link
+   *  kinds: an ingredient item mirrors `materials.price_per_unit`, a
+   *  recipe-backed item mirrors its HPP product's computed `hpp` (see
+   *  `server/lib/hpp-cost-sync.ts`). Defaults to true in the DB so
+   *  legacy callers that never pass this still get the historical
+   *  "always sync" behaviour. */
   autoSyncHppCost: z.boolean().optional(),
   /**
    * Whether the item shows in the POS catalog. Smart default at
@@ -1151,26 +1157,65 @@ export const createInventoryItem = createServerFn({ method: 'POST' })
 // ─── Bulk import from HPP ──────────────────────────────────────────
 
 /**
- * Candidates for the bulk HPP → inventory import page. Returns every
- * HPP material and product, each flagged `alreadyImported` when an
- * active inventory item already links back to it, plus the unit list
- * and the tenant's SKU quota so the page can guard before saving.
+ * Candidates for the bulk HPP → inventory screen. Returns every HPP
+ * material and product, plus the unit list and the tenant's SKU quota
+ * so the page can guard before saving.
+ *
+ * Each row carries the state of its existing link:
+ *
+ *   alreadyImported — an active inventory item already links back
+ *   currentCost     — that item's stored `cost_price`
+ *   currentPrice    — its tier-1 POS price on the base unit (products)
+ *   needsSync       — one of those has drifted from what HPP now says
+ *
+ * `needsSync` is what turns this from an import-only screen into a
+ * maintenance one. An imported row used to be locked forever, so a
+ * tenant whose catalog was fully imported opened the page to find every
+ * row greyed out and the save button dead — nothing to add, and no way
+ * to pull in later HPP changes.
  */
 export const getHppImportCandidates = createServerFn().handler(async () => {
   const auth = await requireInventoryAccess()
   const limits = inventoryTierLimits(auth.inventoryTier)
 
-  const [linkedRows, mats, prods, units, countRow] = await Promise.all([
+  const [linkedRows, tierRows, mats, prods, units, countRow] = await Promise.all([
     db
       .select({
+        id: inventoryItems.id,
         mat: inventoryItems.linkedHppMaterialId,
         prod: inventoryItems.linkedHppProductId,
+        costPrice: inventoryItems.costPrice,
+        autoSyncHppCost: inventoryItems.autoSyncHppCost,
+        isSellable: inventoryItems.isSellable,
       })
       .from(inventoryItems)
       .where(
         and(
           eq(inventoryItems.tenantId, auth.tenantId),
           eq(inventoryItems.isActive, true),
+        ),
+      ),
+    // Tier-1 price on each item's BASE unit — the one row
+    // `syncPosPriceFromHppProduct` writes, so the only one worth
+    // diffing here. Any other tier or unit is the tenant's own
+    // wholesale policy and HPP has nothing to say about it.
+    db
+      .select({
+        itemId: inventoryItemUnitPricing.itemId,
+        unitPrice: inventoryItemUnitPricing.unitPrice,
+      })
+      .from(inventoryItemUnitPricing)
+      .innerJoin(
+        inventoryItems,
+        and(
+          eq(inventoryItems.id, inventoryItemUnitPricing.itemId),
+          eq(inventoryItems.baseUnitId, inventoryItemUnitPricing.unitId),
+        ),
+      )
+      .where(
+        and(
+          eq(inventoryItemUnitPricing.tenantId, auth.tenantId),
+          eq(inventoryItemUnitPricing.minQty, '1'),
         ),
       ),
     db
@@ -1218,31 +1263,185 @@ export const getHppImportCandidates = createServerFn().handler(async () => {
       ),
   ])
 
-  const linkedMat = new Set(
-    linkedRows.map((r) => r.mat).filter((v): v is string => v != null),
+  const tier1ByItem = new Map(
+    tierRows.map((r) => [r.itemId, Number(r.unitPrice)]),
   )
-  const linkedProd = new Set(
-    linkedRows.map((r) => r.prod).filter((v): v is string => v != null),
-  )
+
+  /**
+   * Linked items grouped by the HPP row they follow. Nothing stops two
+   * inventory items linking to the same material or product (a tenant
+   * tracking the same bean in two pack sizes), so this aggregates
+   * across all of them rather than assuming one.
+   */
+  type LinkState = {
+    count: number
+    /** Cost shown to the user — the first linked item's. */
+    currentCost: number
+    /**
+     * Tier-1 base-unit price of the first linked SELLABLE item. Null
+     * means either nothing sellable links here, or something does and
+     * has no price row yet — which is drift too.
+     */
+    currentPrice: number | null
+    /** At least one linked item still follows HPP for its cost. */
+    anyAutoSync: boolean
+    /** At least one linked item is on the POS catalog. */
+    anySellable: boolean
+  }
+  const byMaterial = new Map<string, LinkState>()
+  const byProduct = new Map<string, LinkState>()
+
+  for (const row of linkedRows) {
+    const key = row.mat ?? row.prod
+    if (!key) continue
+    const bucket = row.mat != null ? byMaterial : byProduct
+    const existing = bucket.get(key)
+    if (existing) {
+      existing.count += 1
+      existing.anyAutoSync ||= row.autoSyncHppCost
+      existing.anySellable ||= row.isSellable
+      if (existing.currentPrice == null && row.isSellable) {
+        existing.currentPrice = tier1ByItem.get(row.id) ?? null
+      }
+      continue
+    }
+    bucket.set(key, {
+      count: 1,
+      currentCost: Number(row.costPrice),
+      currentPrice: row.isSellable ? (tier1ByItem.get(row.id) ?? null) : null,
+      anyAutoSync: row.autoSyncHppCost,
+      anySellable: row.isSellable,
+    })
+  }
 
   return {
     units,
     skuCap: limits.skuCap,
     skuCount: countRow[0]?.count ?? 0,
-    materials: mats.map((m) => ({ ...m, alreadyImported: linkedMat.has(m.id) })),
+    materials: mats.map((m) => {
+      const link = byMaterial.get(m.id)
+      const target = Number(m.pricePerUnit)
+      return {
+        ...m,
+        alreadyImported: link != null,
+        linkedCount: link?.count ?? 0,
+        currentCost: link?.currentCost ?? null,
+        targetCost: target,
+        // Auto-sync off is a deliberate opt-out, not drift — the owner
+        // said this item's cost is theirs to set. Offering to "fix" it
+        // would undo that choice every time they open this page.
+        needsSync:
+          link != null && link.anyAutoSync && link.currentCost !== target,
+      }
+    }),
     // `hpp` is a FULL BATCH. The picker must show what will actually become
     // the item's Modal — the per-unit figure — or the number changes the
     // moment the product is imported.
-    products: prods.map((p) => ({
-      ...p,
-      hppPerUnit:
+    products: prods.map((p) => {
+      const link = byProduct.get(p.id)
+      const targetCost =
         p.hpp != null
           ? perUnitHpp(Number(p.hpp), Number(p.productionQty ?? 0))
-          : null,
-      alreadyImported: linkedProd.has(p.id),
-    })),
+          : null
+      const targetPrice = Number(p.sellingPrice)
+      const costDrift =
+        link != null &&
+        link.anyAutoSync &&
+        targetCost != null &&
+        link.currentCost !== targetCost
+      // The selling price is unconditionally HPP-owned for a linked
+      // sellable item (see pos-price-sync.ts), so no toggle guards it.
+      // A sellable item with no tier-1 row at all counts as drift: the
+      // till shows "belum ada harga" while HPP knows the price, and one
+      // tick here fixes that.
+      const priceDrift =
+        link != null &&
+        link.anySellable &&
+        (link.currentPrice == null
+          ? targetPrice > 0
+          : link.currentPrice !== targetPrice)
+      return {
+        ...p,
+        hppPerUnit: targetCost,
+        alreadyImported: link != null,
+        linkedCount: link?.count ?? 0,
+        currentCost: link?.currentCost ?? null,
+        currentPrice: link?.currentPrice ?? null,
+        targetPrice,
+        needsSync: costDrift || priceDrift,
+      }
+    }),
   }
 })
+
+const bulkSyncInput = z.object({
+  source: z.enum(['material', 'product']),
+  hppIds: z.array(z.string().uuid()).min(1, 'Pilih minimal 1 item'),
+})
+
+/**
+ * Re-apply HPP's current numbers to inventory items that already link
+ * back to the given materials / products.
+ *
+ * The counterpart to `bulkCreateInventoryItemsFromHpp`: that one is for
+ * rows with no item yet, this one for rows whose item has fallen behind.
+ * Materials push cost only; products push cost AND the tier-1 POS price,
+ * because for a recipe-backed item HPP owns both.
+ *
+ * Idempotent — re-running changes nothing once everything matches.
+ */
+export const bulkSyncInventoryItemsFromHpp = createServerFn({ method: 'POST' })
+  .inputValidator(bulkSyncInput)
+  .handler(async ({ data }) => {
+    const auth = await requireInventoryAccess()
+
+    // One transaction: a half-applied refresh would leave the owner
+    // looking at a screen that reports everything in sync when only
+    // some of it is.
+    return db.transaction(async (tx) => {
+      if (data.source === 'material') {
+        const cost = await syncInventoryCostFromMaterials(
+          auth.tenantId,
+          tx,
+          data.hppIds,
+        )
+        return { costUpdated: cost.updated.length, priceUpdated: 0 }
+      }
+
+      const cost = await syncInventoryCostFromProducts(
+        auth.tenantId,
+        tx,
+        data.hppIds,
+      )
+
+      // Price sync is per-product in this codebase, so read the prices
+      // once and drive it. Only the tenant's own products can be named
+      // here — the ids are filtered by tenant, so a forged id syncs
+      // nothing rather than reaching across tenants.
+      const priced = await tx
+        .select({ id: products.id, sellingPrice: products.sellingPrice })
+        .from(products)
+        .where(
+          and(
+            eq(products.tenantId, auth.tenantId),
+            inArray(products.id, data.hppIds),
+          ),
+        )
+
+      let priceUpdated = 0
+      for (const product of priced) {
+        const result = await syncPosPriceFromHppProduct(
+          auth.tenantId,
+          product.id,
+          Number(product.sellingPrice),
+          tx,
+        )
+        priceUpdated += result.updated.length
+      }
+
+      return { costUpdated: cost.updated.length, priceUpdated }
+    })
+  })
 
 const bulkImportInput = z.object({
   source: z.enum(['material', 'product']),
@@ -1487,7 +1686,14 @@ export const updateInventoryItem = createServerFn({ method: 'POST' })
         notes: updates.notes ?? null,
         linkedHppMaterialId: updates.linkedHppMaterialId ?? null,
         linkedHppProductId: updates.linkedHppProductId ?? null,
-        autoSyncHppCost: updates.autoSyncHppCost ?? true,
+        // Absent means "not being edited", not "reset to on". Now that
+        // this flag also governs recipe-linked items, defaulting it back
+        // to true would let any caller that doesn't send the field —
+        // the mobile bridge, a partial update — silently re-enable a
+        // sync the owner had deliberately switched off.
+        ...(updates.autoSyncHppCost !== undefined
+          ? { autoSyncHppCost: updates.autoSyncHppCost }
+          : {}),
         // Edits respect explicit user choice; absence leaves the
         // existing value alone (no smart-default on update — the
         // user might have toggled this and we mustn't undo it).

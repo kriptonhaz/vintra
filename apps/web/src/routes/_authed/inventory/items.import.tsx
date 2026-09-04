@@ -1,9 +1,10 @@
 import * as React from 'react'
 import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
-import { ArrowLeft, PackagePlus, Search } from 'lucide-react'
+import { ArrowLeft, PackagePlus, RefreshCw, Search } from 'lucide-react'
 import {
   getHppImportCandidates,
   bulkCreateInventoryItemsFromHpp,
+  bulkSyncInventoryItemsFromHpp,
 } from '@/server/functions/inventory'
 import { ModuleBreadcrumb } from '@/components/layout/module-breadcrumb'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,9 @@ export const Route = createFileRoute('/_authed/inventory/items/import')({
 })
 
 type Candidates = Awaited<ReturnType<typeof getHppImportCandidates>>
+type MaterialRow = Candidates['materials'][number]
+type ProductRow = Candidates['products'][number]
+type Row = MaterialRow | ProductRow
 type Source = 'material' | 'product'
 
 // Sentinel for the "products with no category" filter option.
@@ -34,6 +38,15 @@ const UNCATEGORIZED = '__uncategorized__'
 // Rows rendered per page. Keeps the DOM light for big HPP catalogs;
 // "Pilih Semua" still spans every page (selection is keyed by id).
 const PAGE_SIZE = 30
+
+/**
+ * A row is actionable when there is something this page can do to it:
+ * create the missing inventory item, or refresh one that has fallen
+ * behind HPP. Everything else is already in sync and stays read-only.
+ */
+function isActionable(r: Row): boolean {
+  return !r.alreadyImported || r.needsSync
+}
 
 interface RowDraft {
   selected: boolean
@@ -44,9 +57,9 @@ interface RowDraft {
 }
 
 /**
- * Seed one draft per HPP candidate. Un-imported rows start selected
- * (the common case is "import everything new"); imported rows start
- * unselected and get disabled in the table. Defaults mirror the
+ * Seed one draft per HPP candidate. Actionable rows start selected (the
+ * common case is "do everything that needs doing"); rows already in sync
+ * start unselected and get disabled in the table. Defaults mirror the
  * single-create smart defaults: a raw material hides from POS, a
  * finished product shows in POS.
  */
@@ -56,7 +69,7 @@ function buildDrafts(data: Candidates): Record<string, RowDraft> {
   const out: Record<string, RowDraft> = {}
   for (const m of data.materials) {
     out[m.id] = {
-      selected: !m.alreadyImported,
+      selected: isActionable(m),
       minStockLevel: '',
       isSellable: false,
       isBookable: false,
@@ -65,7 +78,7 @@ function buildDrafts(data: Candidates): Record<string, RowDraft> {
   }
   for (const p of data.products) {
     out[p.id] = {
-      selected: !p.alreadyImported,
+      selected: isActionable(p),
       minStockLevel: '',
       isSellable: true,
       isBookable: false,
@@ -90,7 +103,7 @@ function ImportPage() {
   )
 
   // After a save the loader is invalidated; rebuild drafts so the
-  // just-imported rows flip to their disabled "Sudah ditambahkan" state.
+  // just-processed rows flip to their disabled "Sudah sinkron" state.
   React.useEffect(() => {
     setDrafts(buildDrafts(data))
   }, [data])
@@ -99,7 +112,7 @@ function ImportPage() {
     setDrafts((d) => ({ ...d, [id]: { ...d[id]!, ...p } }))
   }
 
-  const tabRows = tab === 'material' ? data.materials : data.products
+  const tabRows: Row[] = tab === 'material' ? data.materials : data.products
 
   // Category options for the Produk Jadi tab — derived from the
   // products themselves so the dropdown only lists categories in use.
@@ -143,18 +156,21 @@ function ImportPage() {
   )
 
   // Selection (what Save submits) spans the whole tab — a row stays
-  // selected even when the search/category filter or pagination hides it.
-  const selectedIds = tabRows
-    .filter((r) => !r.alreadyImported && drafts[r.id]?.selected)
-    .map((r) => r.id)
+  // selected even when the search/category filter or pagination hides
+  // it — and splits by what will actually happen to it.
+  const selected = tabRows.filter(
+    (r) => isActionable(r) && drafts[r.id]?.selected,
+  )
+  const toCreate = selected.filter((r) => !r.alreadyImported)
+  const toSync = selected.filter((r) => r.alreadyImported)
 
-  // "Pilih Semua" acts on every un-imported row matching the current
+  // "Pilih Semua" acts on every actionable row matching the current
   // filter — across all pages, not just the page on screen.
-  const filteredImportable = filteredRows.filter((r) => !r.alreadyImported)
+  const filteredActionable = filteredRows.filter(isActionable)
   const allSelected =
-    filteredImportable.length > 0 &&
-    filteredImportable.every((r) => drafts[r.id]?.selected)
-  const someSelected = filteredImportable.some((r) => drafts[r.id]?.selected)
+    filteredActionable.length > 0 &&
+    filteredActionable.every((r) => drafts[r.id]?.selected)
+  const someSelected = filteredActionable.some((r) => drafts[r.id]?.selected)
 
   // Native checkboxes can't show "indeterminate" via a prop.
   const selectAllRef = React.useRef<HTMLInputElement>(null)
@@ -168,42 +184,71 @@ function ImportPage() {
     const next = !allSelected
     setDrafts((d) => {
       const copy = { ...d }
-      for (const r of filteredImportable)
+      for (const r of filteredActionable)
         copy[r.id] = { ...copy[r.id]!, selected: next }
       return copy
     })
   }
 
-  // SKU quota guard — null cap means unlimited.
+  // SKU quota guard — null cap means unlimited. Only NEW items consume
+  // quota; refreshing an existing one costs nothing.
   const remaining =
     data.skuCap != null ? Math.max(0, data.skuCap - data.skuCount) : null
-  const overQuota = remaining != null && selectedIds.length > remaining
+  const overQuota = remaining != null && toCreate.length > remaining
+  const driftCount = tabRows.filter(
+    (r) => r.alreadyImported && r.needsSync,
+  ).length
 
   async function handleSave() {
-    if (selectedIds.length === 0 || overQuota) return
+    if (selected.length === 0 || overQuota) return
     setSaving(true)
     try {
-      const items = selectedIds.map((id) => {
-        const dr = drafts[id]!
-        return {
-          hppId: id,
-          baseUnitId: dr.baseUnitId,
-          minStockLevel:
-            tab === 'material' && dr.minStockLevel.trim() !== ''
-              ? Number(dr.minStockLevel)
-              : null,
-          isSellable: dr.isSellable,
-          isBookable: dr.isBookable,
+      const messages: string[] = []
+
+      if (toCreate.length > 0) {
+        const items = toCreate.map((r) => {
+          const dr = drafts[r.id]!
+          return {
+            hppId: r.id,
+            baseUnitId: dr.baseUnitId,
+            minStockLevel:
+              tab === 'material' && dr.minStockLevel.trim() !== ''
+                ? Number(dr.minStockLevel)
+                : null,
+            isSellable: dr.isSellable,
+            isBookable: dr.isBookable,
+          }
+        })
+        const res = await bulkCreateInventoryItemsFromHpp({
+          data: { source: tab, items },
+        })
+        messages.push(`${res.created} item ditambahkan`)
+        if (res.skipped > 0) {
+          messages.push(`${res.skipped} dilewati (sudah ada)`)
         }
-      })
-      const res = await bulkCreateInventoryItemsFromHpp({
-        data: { source: tab, items },
-      })
+      }
+
+      if (toSync.length > 0) {
+        const res = await bulkSyncInventoryItemsFromHpp({
+          data: { source: tab, hppIds: toSync.map((r) => r.id) },
+        })
+        if (res.costUpdated === 0 && res.priceUpdated === 0) {
+          // Reachable: an item flagged as needing a price but whose base
+          // unit was never added as a sellable unit has nowhere for the
+          // price to land. Saying "0 diperbarui" would read as a failure;
+          // this says what actually happened.
+          messages.push(`${toSync.length} item sudah sesuai — tidak ada yang berubah`)
+        } else {
+          messages.push(`${res.costUpdated} harga modal diperbarui`)
+          if (res.priceUpdated > 0) {
+            messages.push(`${res.priceUpdated} harga jual diperbarui`)
+          }
+        }
+      }
+
       toast({
         title: 'Berhasil',
-        description:
-          `${res.created} item ditambahkan` +
-          (res.skipped > 0 ? `, ${res.skipped} dilewati (sudah ada).` : '.'),
+        description: `${messages.join(', ')}.`,
         variant: 'success',
       })
       await router.invalidate()
@@ -218,6 +263,13 @@ function ImportPage() {
     }
   }
 
+  const actionLabel =
+    toCreate.length > 0 && toSync.length > 0
+      ? `Tambah ${toCreate.length} & Perbarui ${toSync.length}`
+      : toSync.length > 0
+        ? `Perbarui ${toSync.length} Item`
+        : `Tambah ${toCreate.length > 0 ? `${toCreate.length} ` : ''}Item`
+
   return (
     <div className="space-y-6 pb-24">
       <ModuleBreadcrumb />
@@ -231,11 +283,12 @@ function ImportPage() {
           <ArrowLeft className="h-4 w-4" /> Kembali ke Inventaris
         </Link>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-          Tambah Massal dari HPP
+          Tambah &amp; Perbarui dari HPP
         </h1>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Pilih sumber HPP, lalu centang item yang ingin ditambahkan ke
-          inventaris. Unit dan harga pokok diambil otomatis dari HPP.
+          Centang item yang ingin ditambahkan ke inventaris, atau yang harganya
+          ingin disamakan lagi dengan HPP. Unit dan harga pokok diambil otomatis
+          dari HPP.
         </p>
       </div>
 
@@ -261,6 +314,17 @@ function ImportPage() {
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Item aktif: {data.skuCount}/{data.skuCap} — sisa kuota {remaining}.
         </p>
+      )}
+
+      {driftCount > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-900 dark:border-warning-900/40 dark:bg-warning-900/20 dark:text-warning-200">
+          <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            {driftCount} item sudah ada di inventaris tapi harganya belum
+            mengikuti HPP terbaru. Sudah dicentang otomatis — tekan tombol di
+            bawah untuk menyamakan.
+          </p>
+        </div>
       )}
 
       {/* Search + (product-only) category filter */}
@@ -292,10 +356,10 @@ function ImportPage() {
         )}
       </div>
 
-      {filteredImportable.length > 0 && (
+      {filteredActionable.length > 0 && (
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Centang kotak di header tabel untuk memilih semua{' '}
-          {filteredImportable.length} item belum ditambahkan — termasuk yang
+          {filteredActionable.length} item yang bisa diproses — termasuk yang
           ada di halaman lain.
         </p>
       )}
@@ -321,9 +385,9 @@ function ImportPage() {
                     type="checkbox"
                     className="h-4 w-4"
                     checked={allSelected}
-                    disabled={filteredImportable.length === 0}
+                    disabled={filteredActionable.length === 0}
                     onChange={toggleAll}
-                    aria-label="Pilih semua item belum ditambahkan"
+                    aria-label="Pilih semua item yang bisa diproses"
                   />
                 </TableHead>
                 <TableHead>Nama</TableHead>
@@ -349,19 +413,21 @@ function ImportPage() {
               {pagedRows.map((r) => {
                 const dr = drafts[r.id]
                 if (!dr) return null
-                const done = r.alreadyImported
-                const editable = !done && dr.selected
+                const actionable = isActionable(r)
+                // Only a brand-new item takes these settings; a refresh
+                // touches prices and nothing else.
+                const editable = !r.alreadyImported && dr.selected
                 return (
                   <TableRow
                     key={r.id}
-                    className={done ? 'opacity-50' : ''}
+                    className={actionable ? '' : 'opacity-50'}
                   >
                     <TableCell>
                       <input
                         type="checkbox"
                         className="h-4 w-4"
-                        disabled={done}
-                        checked={!done && dr.selected}
+                        disabled={!actionable}
+                        checked={actionable && dr.selected}
                         onChange={(e) =>
                           patch(r.id, { selected: e.target.checked })
                         }
@@ -391,7 +457,10 @@ function ImportPage() {
                           {r.unitLabel}
                         </TableCell>
                         <TableCell className="text-right text-sm">
-                          {formatRupiah(Number(r.pricePerUnit))}
+                          <PriceCell
+                            current={r.currentCost}
+                            target={Number(r.pricePerUnit)}
+                          />
                         </TableCell>
                         <TableCell>
                           <Input
@@ -411,12 +480,20 @@ function ImportPage() {
                     ) : 'sellingPrice' in r ? (
                       <>
                         <TableCell className="text-right text-sm">
-                          {r.hppPerUnit != null
-                            ? formatRupiah(Number(r.hppPerUnit))
-                            : '—'}
+                          {r.hppPerUnit != null ? (
+                            <PriceCell
+                              current={r.currentCost}
+                              target={r.hppPerUnit}
+                            />
+                          ) : (
+                            '—'
+                          )}
                         </TableCell>
                         <TableCell className="text-right text-sm">
-                          {formatRupiah(Number(r.sellingPrice))}
+                          <PriceCell
+                            current={r.currentPrice}
+                            target={r.targetPrice}
+                          />
                         </TableCell>
                         <TableCell>
                           <Select
@@ -467,13 +544,7 @@ function ImportPage() {
                       />
                     </TableCell>
                     <TableCell>
-                      {done ? (
-                        <span className="inline-flex whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                          Sudah ditambahkan
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">Baru</span>
-                      )}
+                      <StatusBadge row={r} />
                     </TableCell>
                   </TableRow>
                 )
@@ -513,7 +584,10 @@ function ImportPage() {
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800 lg:left-64">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            {selectedIds.length} item dipilih
+            {toCreate.length > 0 && <>{toCreate.length} item baru</>}
+            {toCreate.length > 0 && toSync.length > 0 && ' · '}
+            {toSync.length > 0 && <>{toSync.length} item diperbarui</>}
+            {selected.length === 0 && 'Belum ada item dipilih'}
             {overQuota && (
               <span className="ml-2 text-danger-600">
                 — melebihi sisa kuota ({remaining})
@@ -524,13 +598,62 @@ function ImportPage() {
             variant="brand"
             onClick={handleSave}
             loading={saving}
-            disabled={selectedIds.length === 0 || overQuota}
+            disabled={selected.length === 0 || overQuota}
           >
-            <PackagePlus className="h-4 w-4" />
-            Tambah {selectedIds.length > 0 ? `${selectedIds.length} ` : ''}Item
+            {toCreate.length === 0 && toSync.length > 0 ? (
+              <RefreshCw className="h-4 w-4" />
+            ) : (
+              <PackagePlus className="h-4 w-4" />
+            )}
+            {actionLabel}
           </Button>
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * One money column. Shows the HPP value alone for a row with no
+ * inventory item yet, and "old → new" when the linked item disagrees —
+ * that difference is the whole reason to tick the row.
+ */
+function PriceCell({
+  current,
+  target,
+}: {
+  current: number | null
+  target: number
+}) {
+  if (current == null || current === target) {
+    return <span>{formatRupiah(target)}</span>
+  }
+  return (
+    <span className="whitespace-nowrap">
+      <span className="text-gray-400 line-through">
+        {formatRupiah(current)}
+      </span>{' '}
+      <span className="font-medium text-warning-700 dark:text-warning-400">
+        {formatRupiah(target)}
+      </span>
+    </span>
+  )
+}
+
+function StatusBadge({ row }: { row: Row }) {
+  if (!row.alreadyImported) {
+    return <span className="text-xs text-gray-400">Baru</span>
+  }
+  if (row.needsSync) {
+    return (
+      <span className="inline-flex whitespace-nowrap rounded-full bg-warning-100 px-2 py-0.5 text-xs font-medium text-warning-800 dark:bg-warning-900/30 dark:text-warning-300">
+        Perlu diperbarui
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+      Sudah sinkron
+    </span>
   )
 }

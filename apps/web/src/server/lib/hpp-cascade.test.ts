@@ -9,6 +9,7 @@ const result = (
   unchanged: 0,
   unresolved: [],
   maxDepth: 0,
+  costSyncedItems: 0,
   ...extra,
 })
 

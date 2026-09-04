@@ -120,14 +120,22 @@ export const inventoryItems = pgTable(
       { onDelete: 'set null' },
     ),
     /**
-     * Per-item override for HPP price sync. When true (default for new
-     * items) AND the item links to an HPP material:
+     * Per-item override for the HPP cost sync. Governs BOTH link kinds.
+     *
+     * When true (the default) and the item links to an HPP MATERIAL:
      *  - stock-in movements push their unit cost to materials.pricePerUnit
      *  - HPP material price edits trigger a "Apply to inventory?"
      *    notification with bulk-update affordance
+     *
+     * When true and the item links to an HPP PRODUCT, its cost_price
+     * follows that product's computed `hpp` on every cascade — see
+     * `server/lib/hpp-cost-sync.ts`. Before that module existed a
+     * recipe-backed item's cost was copied once at import and frozen,
+     * so this flag had nothing to govern on the recipe side.
+     *
      * Off lets a power user keep the link visible for traceability but
-     * stop the auto-sync (e.g., they buy at a different price than HPP
-     * stores for costing reasons). Ignored when linkedHppMaterialId is
+     * stop the auto-sync (e.g. they buy at a different price than HPP
+     * stores for costing reasons). Ignored when both link columns are
      * null — no link, nothing to sync.
      */
     autoSyncHppCost: boolean('auto_sync_hpp_cost').notNull().default(true),

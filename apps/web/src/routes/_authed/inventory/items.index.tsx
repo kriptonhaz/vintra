@@ -1595,21 +1595,10 @@ export function HppLinkPicker({
             </p>
           )}
           {showAutoSync && (
-            <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-md border border-gray-200 px-3 py-2 dark:border-gray-700">
-              <input
-                type="checkbox"
-                {...registerAutoSync}
-                className="mt-0.5 h-4 w-4 rounded text-brand-600 focus:ring-brand-500"
-              />
-              <span className="text-xs">
-                <span className="block font-medium text-gray-700 dark:text-gray-300">
-                  {t('inventory.autoSyncHppLabel')}
-                </span>
-                <span className="mt-0.5 block text-gray-500 dark:text-gray-400">
-                  {t('inventory.autoSyncHppHint')}
-                </span>
-              </span>
-            </label>
+            <AutoSyncHppToggle
+              registerAutoSync={registerAutoSync}
+              hint={t('inventory.autoSyncHppHint')}
+            />
           )}
         </div>
       )}
@@ -1650,9 +1639,53 @@ export function HppLinkPicker({
               auto-deduct setiap penjualan (paket Toko/Komplit).
             </p>
           )}
+          {/* The same toggle the ingredient branch has always shown. It
+              governs recipe-backed items too now that their cost follows
+              the recipe's HPP, so a tenant who prices this item some
+              other way needs the same way out. */}
+          {selectedHppProduct && (
+            <AutoSyncHppToggle
+              registerAutoSync={registerAutoSync}
+              hint={t('inventory.autoSyncHppRecipeHint')}
+            />
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * The "follow HPP" opt-out, shared by both link kinds. The wording
+ * differs (an ingredient mirrors a price, a recipe mirrors a computed
+ * cost) but the control is one checkbox over one column, so it lives
+ * in one place.
+ */
+function AutoSyncHppToggle({
+  registerAutoSync,
+  hint,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registerAutoSync: any
+  hint: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-md border border-gray-200 px-3 py-2 dark:border-gray-700">
+      <input
+        type="checkbox"
+        {...registerAutoSync}
+        className="mt-0.5 h-4 w-4 rounded text-brand-600 focus:ring-brand-500"
+      />
+      <span className="text-xs">
+        <span className="block font-medium text-gray-700 dark:text-gray-300">
+          {t('inventory.autoSyncHppLabel')}
+        </span>
+        <span className="mt-0.5 block text-gray-500 dark:text-gray-400">
+          {hint}
+        </span>
+      </span>
+    </label>
   )
 }
 
