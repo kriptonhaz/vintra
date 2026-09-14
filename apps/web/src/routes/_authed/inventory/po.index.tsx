@@ -2,11 +2,23 @@ import { useState, useMemo } from 'react'
 import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { Plus, ShoppingCart, Lock, Search } from 'lucide-react'
+import type { TFunction } from 'i18next'
+import {
+  Plus,
+  ShoppingCart,
+  Lock,
+  Search,
+  FileSpreadsheet,
+} from 'lucide-react'
 import { getInventoryOverview } from '@/server/functions/inventory'
-import { listPurchaseOrders } from '@/server/functions/inventory-po'
+import {
+  listPurchaseOrders,
+  exportPurchaseOrders,
+} from '@/server/functions/inventory-po'
 import { useBranch } from '@/hooks/use-branch'
 import { Button } from '@/components/ui/button'
+import { useToast } from '@/components/ui/toast'
+import { downloadXlsx } from '@/components/pos/reports/export-helpers'
 import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { Select } from '@/components/ui/select'
@@ -54,6 +66,8 @@ function PoPage() {
   const [supplierFilter, setSupplierFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const { toast } = useToast()
 
   if (data.tier === 'free') {
     return (
@@ -117,6 +131,46 @@ function PoPage() {
     return searchScoped.filter((p) => p.status === statusFilter)
   }, [searchScoped, statusFilter])
 
+  /**
+   * Re-fetch every matching PO with its lines before writing the file —
+   * the list above holds only the latest 50 POs and no line items. The
+   * on-screen filters are carried over so the file matches the screen.
+   */
+  async function handleExport() {
+    setExporting(true)
+    try {
+      const result = await exportPurchaseOrders({
+        data: {
+          branchId: selectedBranchId ?? undefined,
+          status: statusFilter === 'all' ? undefined : statusFilter,
+          supplierName: supplierFilter || undefined,
+          search: searchQuery.trim() || undefined,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+        },
+      })
+      downloadPoWorkbook(result, t)
+      if (result.truncated) {
+        toast({
+          title: t('inventory.poExportTruncatedTitle'),
+          description: t('inventory.poExportTruncatedBody', {
+            count: result.limit,
+          }),
+          variant: 'error',
+        })
+      }
+    } catch (err) {
+      toast({
+        title: t('inventory.poExportFailedTitle'),
+        description:
+          err instanceof Error ? err.message : 'Coba lagi sebentar lagi.',
+        variant: 'error',
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (!pos) {
     return (
       <div className="space-y-6">
@@ -141,10 +195,21 @@ function PoPage() {
             {t('inventory.poSubtitle', { count: pos.total })}
           </p>
         </div>
-        <Button variant="brand" onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-1 h-4 w-4" />
-          {t('inventory.poCreate')}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => void handleExport()}
+            loading={exporting}
+            disabled={filtered.length === 0}
+          >
+            <FileSpreadsheet className="mr-1 h-4 w-4" />
+            {t('inventory.poExportXlsx')}
+          </Button>
+          <Button variant="brand" onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-1 h-4 w-4" />
+            {t('inventory.poCreate')}
+          </Button>
+        </div>
       </div>
 
       {/* Search + supplier + date filters */}
@@ -294,6 +359,83 @@ function PoPage() {
         }}
       />
     </div>
+  )
+}
+
+type PoExport = Awaited<ReturnType<typeof exportPurchaseOrders>>
+
+/**
+ * One sheet, one row per PO line — a PO with 5 items spans 5 rows. The
+ * PO number leads every row and the PO header is repeated alongside it,
+ * so the sheet can be filtered / pivoted on its own. Money and
+ * quantities stay numeric so Excel can sum them.
+ */
+function downloadPoWorkbook(result: PoExport, t: TFunction) {
+  const linesByPo = new Map<string, PoExport['lines']>()
+  for (const line of result.lines) {
+    const list = linesByPo.get(line.purchaseOrderId) ?? []
+    list.push(line)
+    linesByPo.set(line.purchaseOrderId, list)
+  }
+  const day = (d: Date | string | null) => (d ? formatDate(d, 'dd/MM/yyyy') : null)
+  const round = (n: number, digits: number) => Number(n.toFixed(digits))
+
+  const detailRows: (string | number | null)[][] = [
+    [
+      'No. PO',
+      'Tanggal PO',
+      'Status',
+      'Supplier',
+      'Cabang',
+      'Estimasi Tiba',
+      'No.',
+      'Nama Item',
+      'SKU',
+      'Satuan',
+      'Qty Dipesan',
+      'Qty Diterima',
+      'Sisa',
+      'Harga Satuan (Rp)',
+      'Subtotal (Rp)',
+      'Nilai Diterima (Rp)',
+      'Harga Jual Baru (Rp)',
+      'Qty Dipesan (Satuan Dasar)',
+      'Satuan Dasar',
+      'Catatan Item',
+    ],
+  ]
+  for (const po of result.orders) {
+    const status = t(`inventory.poStatus_${po.status}`)
+    const lines = linesByPo.get(po.id) ?? []
+    lines.forEach((line, i) => {
+      detailRows.push([
+        po.poNumber,
+        day(po.createdAt),
+        status,
+        po.supplierName,
+        po.branchName,
+        day(po.expectedAt),
+        i + 1,
+        line.itemName,
+        line.sku,
+        line.unitLabel,
+        line.orderedQty,
+        line.receivedQty,
+        round(Math.max(line.orderedQty - line.receivedQty, 0), 4),
+        round(line.unitCost, 2),
+        line.subtotal,
+        round(line.receivedQty * line.unitCost, 2),
+        line.sellingPrice,
+        round(line.orderedQty * line.unitRatio, 4),
+        line.baseUnitLabel,
+        line.notes,
+      ])
+    })
+  }
+
+  downloadXlsx(
+    [{ name: 'Purchase Order', rows: detailRows }],
+    `Purchase-Order-${formatDate(new Date(), 'yyyy-MM-dd')}.xlsx`,
   )
 }
 

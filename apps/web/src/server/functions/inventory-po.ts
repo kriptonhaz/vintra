@@ -19,7 +19,7 @@ import {
   suppliers,
   masterHppUnits,
 } from '@vintra/db/schema'
-import { and, eq, sql, desc, inArray } from 'drizzle-orm'
+import { and, eq, sql, desc, inArray, gte, lt, or, ilike } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { inventoryTierLimits } from '@vintra/shared'
 import { requireInventoryAccess } from '../middleware/module-access'
@@ -610,6 +610,149 @@ export const getPurchaseOrder = createServerFn({ method: 'POST' })
         // base unit for legacy rows with no explicit unit.
         unitLabel: l.orderedUnitLabel ?? l.baseUnitLabel,
       })),
+    }
+  })
+
+// ─── PO Excel export ─────────────────────────────────────────────────
+
+/** Hard cap on POs per export so one download stays a bounded query. */
+const PO_EXPORT_LIMIT = 2000
+
+const exportPoInput = z.object({
+  status: z
+    .enum(['draft', 'sent', 'partial', 'received', 'cancelled'])
+    .optional(),
+  branchId: z.string().uuid().optional(),
+  supplierName: z.string().max(200).optional(),
+  search: z.string().max(200).optional(),
+  dateFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  dateTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+})
+
+/**
+ * Every PO matching the list page's filters, with ALL of its lines, for
+ * the Excel download. The list page only loads 50 POs and filters them
+ * in the browser; exporting that would silently drop older orders, so
+ * the filters are re-applied here against the full table instead.
+ */
+export const exportPurchaseOrders = createServerFn({ method: 'POST' })
+  .inputValidator(exportPoInput)
+  .handler(async ({ data }) => {
+    const auth = await requireInventoryAccess()
+    assertPoFeatureAvailable(auth.inventoryTier)
+
+    const conds = [eq(purchaseOrders.tenantId, auth.tenantId)]
+    if (data.status) conds.push(eq(purchaseOrders.status, data.status))
+    if (data.supplierName) conds.push(eq(suppliers.name, data.supplierName))
+    if (data.branchId) {
+      // JUR-135: explicit branch filter — gate it.
+      assertBranchAllowed(auth, data.branchId)
+      conds.push(eq(purchaseOrders.branchId, data.branchId))
+    } else {
+      const scope = branchScopeWhere(auth, purchaseOrders.branchId)
+      if (scope) conds.push(scope)
+    }
+    // Date bounds are Jakarta calendar days — the same days the list
+    // renders via formatDate.
+    if (data.dateFrom) {
+      conds.push(
+        gte(purchaseOrders.createdAt, new Date(`${data.dateFrom}T00:00:00+07:00`)),
+      )
+    }
+    if (data.dateTo) {
+      const dayAfter = new Date(`${data.dateTo}T00:00:00+07:00`)
+      dayAfter.setUTCDate(dayAfter.getUTCDate() + 1)
+      conds.push(lt(purchaseOrders.createdAt, dayAfter))
+    }
+    const q = data.search?.trim()
+    if (q) {
+      const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`
+      conds.push(
+        or(
+          ilike(purchaseOrders.poNumber, pattern),
+          ilike(suppliers.name, pattern),
+          ilike(branches.name, pattern),
+        )!,
+      )
+    }
+
+    const orderRows = await db
+      .select({
+        id: purchaseOrders.id,
+        poNumber: purchaseOrders.poNumber,
+        status: purchaseOrders.status,
+        expectedAt: purchaseOrders.expectedAt,
+        createdAt: purchaseOrders.createdAt,
+        supplierName: suppliers.name,
+        branchName: branches.name,
+      })
+      .from(purchaseOrders)
+      .innerJoin(suppliers, eq(purchaseOrders.supplierId, suppliers.id))
+      .innerJoin(branches, eq(purchaseOrders.branchId, branches.id))
+      .where(and(...conds))
+      .orderBy(desc(purchaseOrders.createdAt))
+      .limit(PO_EXPORT_LIMIT + 1)
+
+    const truncated = orderRows.length > PO_EXPORT_LIMIT
+    const orders = orderRows.slice(0, PO_EXPORT_LIMIT)
+    const poIds = orders.map((o) => o.id)
+
+    // Same aliased second unit join as getPurchaseOrder.
+    const orderedUnit = alias(masterHppUnits, 'po_ordered_unit')
+    const lineRows = poIds.length
+      ? await db
+          .select({
+            purchaseOrderId: purchaseOrderItems.purchaseOrderId,
+            itemName: inventoryItems.name,
+            sku: inventoryItems.sku,
+            orderedQty: purchaseOrderItems.orderedQty,
+            receivedQty: purchaseOrderItems.receivedQty,
+            unitCost: purchaseOrderItems.unitCost,
+            sellingPrice: purchaseOrderItems.sellingPrice,
+            subtotal: purchaseOrderItems.subtotal,
+            notes: purchaseOrderItems.notes,
+            unitRatio: purchaseOrderItems.unitRatio,
+            baseUnitLabel: masterHppUnits.label,
+            orderedUnitLabel: orderedUnit.label,
+          })
+          .from(purchaseOrderItems)
+          .innerJoin(
+            inventoryItems,
+            eq(purchaseOrderItems.itemId, inventoryItems.id),
+          )
+          .innerJoin(
+            masterHppUnits,
+            eq(inventoryItems.baseUnitId, masterHppUnits.id),
+          )
+          .leftJoin(orderedUnit, eq(purchaseOrderItems.unitId, orderedUnit.id))
+          .where(inArray(purchaseOrderItems.purchaseOrderId, poIds))
+          .orderBy(inventoryItems.name)
+      : []
+
+    return {
+      orders,
+      lines: lineRows.map((l) => ({
+        purchaseOrderId: l.purchaseOrderId,
+        itemName: l.itemName,
+        sku: l.sku,
+        orderedQty: Number(l.orderedQty),
+        receivedQty: Number(l.receivedQty),
+        unitCost: Number(l.unitCost),
+        sellingPrice: l.sellingPrice != null ? Number(l.sellingPrice) : null,
+        subtotal: Number(l.subtotal),
+        notes: l.notes,
+        unitRatio: l.unitRatio != null ? Number(l.unitRatio) : 1,
+        unitLabel: l.orderedUnitLabel ?? l.baseUnitLabel,
+        baseUnitLabel: l.baseUnitLabel,
+      })),
+      truncated,
+      limit: PO_EXPORT_LIMIT,
     }
   })
 
