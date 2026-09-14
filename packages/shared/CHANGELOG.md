@@ -1,5 +1,93 @@
 # @vintra/shared
 
+## 0.4.0
+
+### Minor Changes
+
+- 1b74cc5: Add Vintra AI — a business Q&A assistant over the tenant's own reports.
+
+  The owner asks in plain Indonesian ("menu mana yang paling untung bulan ini?",
+  "stok apa yang mau habis?") and the assistant answers by calling the reports it
+  is allowed to read: POS sales, sales by product, cashflow dashboard and today's
+  summary, inventory overview, today's attendance, and HPP margins.
+
+  It is not a general chatbot. It can call those seven read-only functions and
+  nothing else, it cannot modify data, and no chat history is stored.
+
+  Bundled into the existing **Komplit** tier rather than given a tier of its own,
+  which is how JuraganQu ships it. Vintra sells a single Rp 149.000 package, so
+  stacking another price level above it would work against that — and no tenant
+  is paying for the first level yet. Spend is metered per call in
+  `ai_usage_logs`, so the cost of the decision is visible before it has to be
+  made again.
+
+  Two independent gates: the tier decides whether a business has the assistant,
+  and `tenant_members.ai_enabled` (migration 0146, default off) decides which
+  staff may use it — the assistant reads sales, cashflow and margin figures an
+  owner may not want every cashier seeing. Owners always pass.
+
+  Also capped: 50 messages per tenant per day, 4 tool-calling rounds per
+  question, and tool results truncated before they reach the model.
+
+  No new AI infrastructure was needed — the provider config, API keys and usage
+  metering already existed for the logo generator; this adds the `text`
+  capability lookup alongside the existing `image` one.
+
+- 7e01ea5: Refuse to ring a POS sale at a price the cashier never saw.
+
+  `createSale` resolves each line's price from the price list at checkout and has
+  always ignored whatever the client sent — right for tamper-resistance, but it
+  means a price edited mid-shift silently reprices a cart that is already open.
+  The cashier says "tujuh belas ribu" out loud and the receipt prints something
+  else.
+
+  `createSale` now compares the price the cart displayed against the one it
+  resolves and refuses the sale — before the stock check and before any write, so
+  there is nothing to unwind — naming each item with its old and new price.
+  Ad-hoc lines are exempt: their price is the cashier's own figure.
+
+  The cashier re-prices its lines in place rather than clearing the cart or
+  reloading, so nothing already rung up is lost and the next Bayar press is a
+  deliberate confirmation of what is now on screen. Item ids are chunked against
+  the server's 50-id cap, because truncating would leave exactly the stale prices
+  this is meant to fix and loop the cashier on the same refusal.
+
+  Both sides import `POS_PRICE_CHANGED_ERROR_PREFIX` from `@vintra/shared`, so
+  they can only drift apart deliberately, not by someone rewording a sentence.
+
+  Ported from JuraganQu (da4e695).
+
+### Patch Changes
+
+- d6e7186: Warn before someone quietly ends up in two tenants.
+
+  Signing up with Google on an account that already belonged to a business never
+  created a second tenant — `UNIQUE(tenants.owner_id)` makes that impossible — but it
+  said nothing either. The person who pressed "Daftar" landed inside their employer's
+  shop with no explanation. `ensureTenantForOAuth` now returns which tenant and role
+  they already hold, and the callback shows that instead of a silent redirect to
+  /dashboard.
+
+  Only on the register path. `login.tsx` and `register.tsx` pass an identical
+  `redirectTo`, so the two are indistinguishable once Google redirects back; without a
+  marker the notice would greet every staff member on every login. A short-lived
+  `vtr_signup` cookie, set only by the register button, carries the intent across the
+  round-trip.
+
+  Inviting someone who already works at another tenant now needs an explicit yes.
+  `checkInviteEmailMemberships` gives the invite sheet the tenant names for its dialog,
+  and `inviteTenantMember` rejects an unconfirmed invite server-side rather than
+  trusting the UI. The invited person also gets a `member_added_to_tenant` notification
+  — web has no tenant switcher yet, so a second membership is otherwise invisible to
+  the one who gained it, and tenant resolution puts an owned tenant ahead of it.
+
+  Guard applies to the email path only. Phone-only invites derive a synthetic
+  `wa-{slug}-{phone}` address and `tenants.slug` is unique, so that user can never
+  belong to another tenant.
+
+  The mobile invite path is unchanged and will reject these invites until it sends the
+  new `confirmExistingMemberships` flag.
+
 ## 0.3.0
 
 ## 0.2.0

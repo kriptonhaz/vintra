@@ -1,5 +1,172 @@
 # @vintra/db
 
+## 0.4.0
+
+### Minor Changes
+
+- 1b74cc5: Add Vintra AI — a business Q&A assistant over the tenant's own reports.
+
+  The owner asks in plain Indonesian ("menu mana yang paling untung bulan ini?",
+  "stok apa yang mau habis?") and the assistant answers by calling the reports it
+  is allowed to read: POS sales, sales by product, cashflow dashboard and today's
+  summary, inventory overview, today's attendance, and HPP margins.
+
+  It is not a general chatbot. It can call those seven read-only functions and
+  nothing else, it cannot modify data, and no chat history is stored.
+
+  Bundled into the existing **Komplit** tier rather than given a tier of its own,
+  which is how JuraganQu ships it. Vintra sells a single Rp 149.000 package, so
+  stacking another price level above it would work against that — and no tenant
+  is paying for the first level yet. Spend is metered per call in
+  `ai_usage_logs`, so the cost of the decision is visible before it has to be
+  made again.
+
+  Two independent gates: the tier decides whether a business has the assistant,
+  and `tenant_members.ai_enabled` (migration 0146, default off) decides which
+  staff may use it — the assistant reads sales, cashflow and margin figures an
+  owner may not want every cashier seeing. Owners always pass.
+
+  Also capped: 50 messages per tenant per day, 4 tool-calling rounds per
+  question, and tool results truncated before they reach the model.
+
+  No new AI infrastructure was needed — the provider config, API keys and usage
+  metering already existed for the logo generator; this adds the `text`
+  capability lookup alongside the existing `image` one.
+
+- 1267b94: Cascade HPP automatically when a stock-in changes an ingredient's cost.
+
+  `products.hpp` is derived data — only ever the sum of what a recipe costs at
+  today's ingredient prices. Letting it drift is not a missing feature, it is
+  wrong data: the owner prices a menu against a cost that no longer exists.
+  Receiving stock at a new cost now recalculates every affected product in the
+  same transaction.
+
+  The cascade is deliberately SILENT on this path. The crew receiving goods are
+  not the people who set menu prices, and stopping them with a "17 products
+  affected, 3 below 20% margin" dialog asks a question they cannot answer in the
+  middle of an unrelated task. The owner is told afterwards by a new
+  `hpp_cascaded` notification carrying the count, the average movement, and how
+  many products fell below a healthy margin. Selling prices are never touched.
+
+  Adds `hpp_price_history` (migration 0144), an append-only ledger of every
+  automatic movement with its reason and triggering material, so "kenapa HPP naik
+  bulan ini?" stays answerable. Only products whose HPP actually moved are
+  written, so the ledger records movements rather than form saves.
+
+  The cascade takes the caller's transaction, which is a correctness requirement
+  rather than a detail: reading through the root client would see the ingredient
+  price as it was BEFORE the enclosing transaction's update and write a
+  confidently wrong number. Verified against production inside a rolled-back
+  transaction — doubling a material's price mid-transaction moved the computed
+  HPP from 25.308,57 to 27.558,57 while the root client still saw the old price.
+
+  Products inside a recipe cycle are left untouched and reported, not guessed.
+
+- c4b0497: Let an item be sold without carrying stock (konsinyasi).
+
+  Consignment is ordinary retail here — the supplier owns the goods, the merchant
+  pays only for what sells, and nobody counts a balance — but the model had no way
+  to say so. A plain item with no balance row reads as "0 in stock", and the
+  `createSale` stock guard refuses the line outright, so a consignment item could
+  be catalogued and priced yet never rung up. The only workaround was to invent a
+  stock figure and keep topping it up, putting a number in the ledger that was
+  never counted.
+
+  `inventory_items.track_stock` (default true, so nothing existing changes) now
+  marks these. When off: the POS guard skips the item, the sale writes no
+  stock-out movement, the cashier tile shows "Titipan" instead of a count and
+  never says "Habis", the inventory list shows "Titipan / stok pemasok" instead of
+  a quantity, low-stock warnings are suppressed, and the item drops out of the
+  stock-in and opname forms. Cost still rides on the sale line, so margin
+  reporting is unaffected.
+
+  This is deliberately separate from the existing no-balance case: recipe-backed
+  items are made to order from ingredients this business does own, consignment
+  items are stocked by someone else. Both bypass the guard; only one deducts
+  anything. Turning tracking off keeps any existing balance rows rather than
+  deleting them, so switching back on restores the old count.
+
+- 6b9f11b: Track supplier payments on purchase orders.
+
+  Payments are recorded per PO with a history (amount, date, method, note). The payment status — unpaid, partially paid, paid — is derived from the sum against the PO total rather than stored, so deleting a mistaken payment can't leave a stale status; cancelled POs carry none. The outstanding check runs under a row lock so two simultaneous payments can't overpay. When the tenant's plan includes Cashflow, each payment is mirrored as a `po_payment` expense on the default account and removed with it. The PO list gains a payment badge and filter, and the Excel export gains payment status, paid and outstanding columns.
+
+  Migration 0149 adds `purchase_order_payments`, the `po_payment` cashflow source and the "Pembelian dari Supplier" system category. Ported from JuraganQu.
+
+- f40dd86: Add a POS setting to hide the cashier's promo-code box.
+
+  The box appeared for every tenant whose tier includes `promo_codes`, whether or
+  not they run promotions — a permanently empty field between the cart and the
+  discount control, on every sale. Pengaturan Kasir now carries a switch for it.
+
+  Defaults to on, so no tenant currently typing promo codes loses the field when
+  this ships; opting out is the new capability. The switch only appears on tiers
+  that actually have promo codes, and the stored value can only narrow the tier,
+  never widen it — `resolvePromoCodeFieldVisible` owns that rule and is tested.
+
+  Automatic promotions (per product, category, or cart total) keep applying when
+  the box is hidden; only the typed-code input goes away. `createSale` also still
+  honours a valid code sent with a sale — this is decluttering, not an anti-fraud
+  gate like ad-hoc lines, and refusing a real discount over a display preference
+  would cost the customer money.
+
+  Also extracts the switch card shared by this and the "Item Lain" setting into
+  one `SettingToggleSection`, so their save and revert-on-failure behaviour
+  cannot drift apart.
+
+### Patch Changes
+
+- d0ad7e2: Stop copying a recipe's FULL BATCH cost into per-unit fields, which made
+  profitable products display as losses.
+
+  `products.hpp` is the cost of one batch (`production_qty` units), but the paths
+  that link an HPP product to inventory copied it straight into
+  `inventory_items.cost_price` — which is per base unit — and into the POS cost
+  snapshot. On the HaRa Cookies tenant, "Cookies Alpukat" costs Rp 25.308,57 per
+  40-piece batch, i.e. Rp 632,71 a piece against a Rp 4.000 price. The HPP screen
+  showed that correctly at an 84,2% margin while the inventory item read "Modal
+  Rp 25.308,57 / Pieces" with a red "Rugi" badge, and every POS sale recorded a
+  40x cost against its revenue.
+
+  Fixed at every site that turns a linked product into a per-unit cost: the "Jual
+  di POS" bulk create, the POS `hppAtSale` snapshot, and the two queries feeding
+  the item form. Those queries now ship a precomputed `hppPerUnit` alongside the
+  raw batch `hpp`, so no caller has to remember to divide — forgetting is exactly
+  what caused this. The web and mobile import pickers show the per-unit figure
+  too, since that is what becomes the item's Modal; they previously showed the
+  batch cost, so the number changed the moment a product was imported.
+
+  Migration 0145 repairs rows already written. It is deliberately narrow: only
+  items whose stored cost still equals the product's batch HPP are touched, since
+  that equality is the signature of the bug — anyone who has since typed their own
+  cost is left alone. Single-yield recipes are excluded, having nothing to repair.
+  Applied to production, correcting 6 items from Rp 25.308,57 to Rp 632,71.
+
+- a23cfc1: Make HPP costs reach the item list, and let the bulk screen refresh.
+
+  Two problems, one root cause: the HPP → inventory bridge was one-way and one-shot.
+
+  A recipe-backed item's cost was copied from HPP at import time and then frozen.
+  Raising the price of one ingredient moved every recipe's HPP while the item list and
+  POS catalog kept showing the old "Modal" indefinitely — the number an owner reads
+  when deciding what to charge. `recalcTenantHpp` now pushes each moved product's cost
+  into its linked items in the same transaction, the way selling prices already did
+  via `pos-price-sync.ts`. Recorded sales were never affected: the sale path reads the
+  live `products.hpp`.
+
+  The `auto_sync_hpp_cost` toggle governs this and is now offered on recipe links, not
+  just ingredient links — so a tenant who prices an item some other way has the same
+  way out they always had for ingredients. An update that omits the field no longer
+  resets it to on, which would have let a partial update silently re-enable a sync the
+  owner had switched off.
+
+  "Tambah Massal dari HPP" was import-only: once a material or product had an
+  inventory item, its row was locked forever. A tenant whose catalog was fully
+  imported opened the page to find every row greyed out and the save button dead —
+  nothing to add, and no way to pull in later HPP changes. Rows now show the drift
+  (`old → new`) and can be ticked to re-sync cost and, for products, the tier-1 POS
+  price. A row whose auto-sync toggle is off is left alone: that is a deliberate
+  opt-out, not drift.
+
 ## 0.3.0
 
 ### Minor Changes

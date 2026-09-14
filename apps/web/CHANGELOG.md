@@ -1,5 +1,651 @@
 # @vintra/web
 
+## 0.4.0
+
+### Minor Changes
+
+- 1b74cc5: Add Vintra AI — a business Q&A assistant over the tenant's own reports.
+
+  The owner asks in plain Indonesian ("menu mana yang paling untung bulan ini?",
+  "stok apa yang mau habis?") and the assistant answers by calling the reports it
+  is allowed to read: POS sales, sales by product, cashflow dashboard and today's
+  summary, inventory overview, today's attendance, and HPP margins.
+
+  It is not a general chatbot. It can call those seven read-only functions and
+  nothing else, it cannot modify data, and no chat history is stored.
+
+  Bundled into the existing **Komplit** tier rather than given a tier of its own,
+  which is how JuraganQu ships it. Vintra sells a single Rp 149.000 package, so
+  stacking another price level above it would work against that — and no tenant
+  is paying for the first level yet. Spend is metered per call in
+  `ai_usage_logs`, so the cost of the decision is visible before it has to be
+  made again.
+
+  Two independent gates: the tier decides whether a business has the assistant,
+  and `tenant_members.ai_enabled` (migration 0146, default off) decides which
+  staff may use it — the assistant reads sales, cashflow and margin figures an
+  owner may not want every cashier seeing. Owners always pass.
+
+  Also capped: 50 messages per tenant per day, 4 tool-calling rounds per
+  question, and tool results truncated before they reach the model.
+
+  No new AI infrastructure was needed — the provider config, API keys and usage
+  metering already existed for the logo generator; this adds the `text`
+  capability lookup alongside the existing `image` one.
+
+- 1267b94: Cascade HPP automatically when a stock-in changes an ingredient's cost.
+
+  `products.hpp` is derived data — only ever the sum of what a recipe costs at
+  today's ingredient prices. Letting it drift is not a missing feature, it is
+  wrong data: the owner prices a menu against a cost that no longer exists.
+  Receiving stock at a new cost now recalculates every affected product in the
+  same transaction.
+
+  The cascade is deliberately SILENT on this path. The crew receiving goods are
+  not the people who set menu prices, and stopping them with a "17 products
+  affected, 3 below 20% margin" dialog asks a question they cannot answer in the
+  middle of an unrelated task. The owner is told afterwards by a new
+  `hpp_cascaded` notification carrying the count, the average movement, and how
+  many products fell below a healthy margin. Selling prices are never touched.
+
+  Adds `hpp_price_history` (migration 0144), an append-only ledger of every
+  automatic movement with its reason and triggering material, so "kenapa HPP naik
+  bulan ini?" stays answerable. Only products whose HPP actually moved are
+  written, so the ledger records movements rather than form saves.
+
+  The cascade takes the caller's transaction, which is a correctness requirement
+  rather than a detail: reading through the root client would see the ingredient
+  price as it was BEFORE the enclosing transaction's update and write a
+  confidently wrong number. Verified against production inside a rolled-back
+  transaction — doubling a material's price mid-transaction moved the computed
+  HPP from 25.308,57 to 27.558,57 while the root client still saw the old price.
+
+  Products inside a recipe cycle are left untouched and reported, not guessed.
+
+- f4fba2a: Show what a manual ingredient-price edit will do before applying it, and
+  cascade it in the same transaction.
+
+  Editing a bahan baku price now previews the consequences first: how many
+  products move, by how much, and — listed by name, worst first — which ones
+  would end up selling under a 20% margin. Confirming applies the price and
+  recalculates every affected product atomically. Selling prices are never
+  touched, and the dialog says so.
+
+  A manual edit asks; a stock-in does not. The person typing a new ingredient
+  price is the person who sets menu prices, so the question is answerable. The
+  crew receiving goods are not, which is why that path stays silent and notifies
+  afterwards.
+
+  The dialog only appears when the price actually moved AND something is actually
+  affected — renaming an ingredient, or repricing one no recipe uses, saves
+  straight through. Confirming re-enters the same save handler with a flag rather
+  than duplicating the write, so the confirmed and unconfirmed paths cannot drift
+  apart.
+
+  `previewMaterialPriceImpact` is read-only: it computes the recipe graph twice,
+  once as stored and once with the price substituted, and diffs them. Verified
+  against production — a hypothetical doubling of "Butter Bos" reported 6
+  affected products averaging +Rp 2.250, and left the stored price untouched.
+
+- c4b0497: Let an item be sold without carrying stock (konsinyasi).
+
+  Consignment is ordinary retail here — the supplier owns the goods, the merchant
+  pays only for what sells, and nobody counts a balance — but the model had no way
+  to say so. A plain item with no balance row reads as "0 in stock", and the
+  `createSale` stock guard refuses the line outright, so a consignment item could
+  be catalogued and priced yet never rung up. The only workaround was to invent a
+  stock figure and keep topping it up, putting a number in the ledger that was
+  never counted.
+
+  `inventory_items.track_stock` (default true, so nothing existing changes) now
+  marks these. When off: the POS guard skips the item, the sale writes no
+  stock-out movement, the cashier tile shows "Titipan" instead of a count and
+  never says "Habis", the inventory list shows "Titipan / stok pemasok" instead of
+  a quantity, low-stock warnings are suppressed, and the item drops out of the
+  stock-in and opname forms. Cost still rides on the sale line, so margin
+  reporting is unaffected.
+
+  This is deliberately separate from the existing no-balance case: recipe-backed
+  items are made to order from ingredients this business does own, consignment
+  items are stocked by someone else. Both bypass the guard; only one deducts
+  anything. Turning tracking off keeps any existing balance rows rather than
+  deleting them, so switching back on restores the old count.
+
+- caa802a: Show each inventory item's margin in Inventaris.
+
+  Resale goods — snacks, bottled drinks, anything bought to be resold as-is —
+  never pass through HPP, so Laporan HPP could not see them and their margin was
+  invisible until the item had actually been sold and showed up in a POS report.
+  Both numbers were already stored; nothing brought them together.
+
+  The item list now shows a margin pill beside the price, and the item detail
+  page shows one per pricing tier (replacing the bare "Rugi" badge, which said
+  there was a problem without saying how big). Thresholds come from the existing
+  `getMarginLevel`, so a snack and a menu item are judged by the same ruler.
+
+  Margin is deliberately blank rather than 0% when the buy price is unset:
+  arithmetic would score that a perfect 100%, which is the exact opposite of the
+  truth.
+
+- b04619e: Add an Excel export to the Purchase Order list: a single sheet with one row per PO line item (PO number in the first column, PO header repeated), following the on-screen filters. The server re-queries every matching PO with all its lines — the list only loads the latest 50 — capped at 2,000 POs with a warning past the cap. Ported from JuraganQu.
+- 6b9f11b: Track supplier payments on purchase orders.
+
+  Payments are recorded per PO with a history (amount, date, method, note). The payment status — unpaid, partially paid, paid — is derived from the sum against the PO total rather than stored, so deleting a mistaken payment can't leave a stale status; cancelled POs carry none. The outstanding check runs under a row lock so two simultaneous payments can't overpay. When the tenant's plan includes Cashflow, each payment is mirrored as a `po_payment` expense on the default account and removed with it. The PO list gains a payment badge and filter, and the Excel export gains payment status, paid and outstanding columns.
+
+  Migration 0149 adds `purchase_order_payments`, the `po_payment` cashflow source and the "Pembelian dari Supplier" system category. Ported from JuraganQu.
+
+- 7e01ea5: Refuse to ring a POS sale at a price the cashier never saw.
+
+  `createSale` resolves each line's price from the price list at checkout and has
+  always ignored whatever the client sent — right for tamper-resistance, but it
+  means a price edited mid-shift silently reprices a cart that is already open.
+  The cashier says "tujuh belas ribu" out loud and the receipt prints something
+  else.
+
+  `createSale` now compares the price the cart displayed against the one it
+  resolves and refuses the sale — before the stock check and before any write, so
+  there is nothing to unwind — naming each item with its old and new price.
+  Ad-hoc lines are exempt: their price is the cashier's own figure.
+
+  The cashier re-prices its lines in place rather than clearing the cart or
+  reloading, so nothing already rung up is lost and the next Bayar press is a
+  deliberate confirmation of what is now on screen. Item ids are chunked against
+  the server's 50-id cap, because truncating would leave exactly the stale prices
+  this is meant to fix and loop the cashier on the same refusal.
+
+  Both sides import `POS_PRICE_CHANGED_ERROR_PREFIX` from `@vintra/shared`, so
+  they can only drift apart deliberately, not by someone rewording a sentence.
+
+  Ported from JuraganQu (da4e695).
+
+- f40dd86: Add a POS setting to hide the cashier's promo-code box.
+
+  The box appeared for every tenant whose tier includes `promo_codes`, whether or
+  not they run promotions — a permanently empty field between the cart and the
+  discount control, on every sale. Pengaturan Kasir now carries a switch for it.
+
+  Defaults to on, so no tenant currently typing promo codes loses the field when
+  this ships; opting out is the new capability. The switch only appears on tiers
+  that actually have promo codes, and the stored value can only narrow the tier,
+  never widen it — `resolvePromoCodeFieldVisible` owns that rule and is tested.
+
+  Automatic promotions (per product, category, or cart total) keep applying when
+  the box is hidden; only the typed-code input goes away. `createSale` also still
+  honours a valid code sent with a sale — this is decluttering, not an anti-fraud
+  gate like ad-hoc lines, and refusing a real discount over a display preference
+  would cost the customer money.
+
+  Also extracts the switch card shared by this and the "Item Lain" setting into
+  one `SettingToggleSection`, so their save and revert-on-failure behaviour
+  cannot drift apart.
+
+- f6b27d9: POS selling prices now follow the HPP product they sell.
+
+  An HPP product and the inventory item created from it describe the same thing
+  being sold, but carried two independent prices: the price was seeded once at
+  import and then diverged freely. The HPP screen could report an 84% margin
+  against Rp 4.000 while the till charged something else — a margin describing a
+  price nobody was ever charged.
+
+  Changing an HPP product's selling price now updates the linked POS item's
+  tier-1 price on its base unit, in the same transaction. Newly linking an item
+  adopts that product's price immediately, since its own price field is read-only
+  from that moment and would otherwise be stranded.
+
+  The sync is one-way and deliberately narrow:
+
+  - **Only tier-1 on the base unit.** An HPP product carries a single price and
+    cannot express a tier ladder ("≥1 Rp 4.000, ≥10 Rp 3.500"). Bulk tiers and
+    alternate units stay manual, because inventing values for them would be
+    guessing at a merchant's wholesale policy.
+  - **Only the product being edited**, never the whole tenant. A tenant-wide pass
+    would silently resolve divergences on products priced differently on purpose,
+    the moment somebody saved any unrelated product.
+  - **Refused server-side**, in `upsertPricingTier`, not merely hidden in the web
+    form — the mobile app calls the same function, so a disabled input would
+    protect one client rather than the rule.
+
+  The item's price controls are replaced by a link to where the price actually
+  lives, deep-linking to that product's recipe at step 3 rather than dropping the
+  owner on the HPP list to find it again. A dead form with no explanation reads
+  as a bug.
+
+  Selling-price moves are NOT written to `hpp_price_history`; that table is a
+  ledger of cost movements and logging a different kind of event there would blur
+  what it means.
+
+- 19c0808: Move the HPP calculation to a single server-side engine.
+
+  The real formula lived in the calculator page while `calculateProductHpp`
+  computed its own weaker version, which is why the screen and the stored
+  `products.hpp` could disagree about the same recipe. `server/lib/hpp-engine.ts`
+  is that formula moved server-side and made total: it walks material and
+  sub-recipe rows together in topological order, so a parent is only costed once
+  every sub-recipe under it is final, and it reports circular recipes instead of
+  guessing a number.
+
+  It also removes a limitation the earlier fix could not. Summing a product's
+  rows locally has to price a sub-recipe from the sub-product's STORED `hpp`,
+  which may itself be stale — a parent then inherits a number nobody recomputed.
+  The engine rebuilds the whole tenant graph from live material prices in one
+  pass.
+
+  The engine reproduces the calculator's arithmetic deliberately rather than
+  tidying it, since that screen is what owners price their menu from — including
+  the divide-by-one fallback for a sub-recipe with no batch yield, and treating a
+  missing material price as 0. One deliberate divergence from JuraganQu's
+  equivalent engine: margin is computed against the PER-UNIT cost, because
+  `products.hpp` stores a full batch while `sellingPrice` is per unit, and
+  comparing them directly reports a multi-yield recipe as a heavy loss.
+
+  Verified against production with `bun run verify:hpp`: the engine reproduces
+  every stored HPP across all 7 tenants exactly, with no cycles. 16 unit tests
+  cover topological ordering, cycles, self-references, out-of-set edges, repeated
+  sub-product rows, precision and margin clamping.
+
+  The pure computation and its database loader are separate modules, so the
+  formula has no database import and its tests need no driver.
+
+### Patch Changes
+
+- 3f8b071: Deploy the web app as immutable releases behind a symlink instead of
+  overwriting the live tree.
+
+  `./deploy.sh web` used to rsync into `~/prod/Vintra` and `rm -rf node_modules`
+  while both PM2 instances were still serving. The build splits routes into
+  hash-named chunks the server imports lazily, so overwriting the tree removes
+  chunks the running processes have not loaded yet — the next request for that
+  route dies with `ERR_MODULE_NOT_FOUND` until the rolling restart reaches that
+  instance. Wiping `node_modules` mid-flight does the same to any dependency not
+  yet required. This hit JuraganQu in production on 2026-08-17, a ~20-second
+  window per deploy; Vintra ran the identical script.
+
+  Each deploy now writes `~/prod/Vintra-releases/<utc>-<sha>/`, installs its own
+  `node_modules` there, and cuts over with a single atomic rename. Node resolves
+  module paths to their realpath, so a process started before the swap keeps
+  loading from its own release until it is restarted — nothing under a running
+  process ever changes. A failed health check rolls the symlink back and
+  restarts. Old releases are pruned only after both instances are on the new one,
+  keeping 3 for rollback.
+
+  `.env` moves to `~/prod/Vintra-shared/.env` and is symlinked into every
+  release, so the documented "edit `~/prod/Vintra/.env`" flow still lands on the
+  same file and now survives deploys. The first deploy copies the existing file
+  there automatically.
+
+  Ported from JuraganQu (6fdf298), with one fix on top: that version leaves
+  `~/prod/Vintra` non-existent for the ~30-60s between retiring the old tree and
+  the cutover, so a PM2 autorestart landing in that window could not resolve its
+  recorded cwd. The symlink is now re-pointed at the retired tree immediately, so
+  the path stays valid throughout.
+
+- f913d9e: Fix every branch-scoped member crashing Inventaris and POS reports.
+
+  Eleven hand-written `sql` fragments scoped a query with
+  `branch_id = ANY(${auth.allowedBranchIds}::uuid[])`. Drizzle binds the JS array
+  as a single parameter, so Postgres received a bare uuid where an array literal
+  belonged and threw `malformed array literal`. An owner's `allowedBranchIds` is
+  null and never reached that branch of the ternary, so the queries worked in all
+  owner testing and failed for anyone pinned to specific branches — Cafe Camaro's
+  supervisor could not open Pergerakan Stok, Sesuaikan Stok, Daftar Stok, Bahan
+  Baku, or any POS report.
+
+  This exact bug was found and fixed once before, in the seven Drizzle
+  query-builder call sites (`inArray()` there). The eleven raw-SQL ones were
+  missed because `branchScopeWhere` needs a column object and these scope table
+  aliases (`b.`, `s.`, `s2.`). `branchScopeSql` now covers that case and is
+  tested, so the correct spelling exists for both shapes and nobody has to
+  hand-write `= ANY(` again.
+
+  No data was ever exposed: the broken query threw rather than returning
+  unfiltered rows.
+
+- 57502f8: Send an expired session to the login page instead of an error screen.
+
+  `requireAuth` threw `new Error('Unauthorized')` whenever it could not establish a
+  session. Route loaders call server functions that run it, so a merely _expired_
+  session rendered the router's error boundary — a page that tells the user
+  something broke — rather than asking them to sign in again. `refreshSessionCoalesced`
+  makes losing the refresh-token rotation race rarer than it would otherwise be, but
+  not impossible, and every loss took a working account to a screen that looked like
+  a fault.
+
+  Web now gets `redirect({ to: '/auth/login' })`. The server-fn transport runs
+  `parseRedirect()` over a thrown error and rethrows it, so this reaches the router
+  as a real navigation.
+
+  The mobile RPC bridge keeps the `Error`. `routes/api.mobile.$fn.ts` infers its HTTP
+  status by string-matching `err.message`, and "unauthorized" is what makes it answer
+  401 — the signal the app's re-login flow waits for. A redirect object has no
+  `.message` and would surface as a 500. That bridge is the only API route using
+  `requireAuth`, so a path-prefix guard covers it exactly.
+
+  This removes the symptom, not the race: the rotation still loses just as often, but
+  the user is asked to log in rather than shown a broken page.
+
+- cede038: Export the whole report, not just the page on screen — and footer every page of it.
+
+  The Produk and Pelanggan reports paginate at 25 rows. Their Export button serialized
+  `rows` — whatever page React Query had loaded — so a tenant with 100 products got 25
+  of them, four times, and stitched the files together by hand. Nothing in the file or
+  the UI said the data was partial, so an owner who never noticed the page count read
+  25 rows as the whole story.
+
+  Both server functions now take `all: true`, which returns every matching row for the
+  current filters in one call and ignores page/pageSize. The export path re-fetches
+  with it rather than reusing the loaded page; filters, search and sort carry over
+  verbatim so the file contains exactly what the screen claims to show, just all of
+  it. Bounded at 10k rows rather than unbounded — these are grouped aggregates held in
+  memory and serialized into a workbook in the browser. Past the cap the response comes
+  back flagged `truncated` and the UI says which rows are missing and how to narrow the
+  range.
+
+  That made a second bug reachable. Every `/pos/reports` PDF draws rows top-to-bottom,
+  calls `addPage()` when it runs past the margin, then calls `pdfFooter()` once at the
+  end — which stamped whichever page the cursor happened to be sitting on. With these
+  reports fitting on one page that was always the right one; a multi-page Produk PDF
+  would have left every page but the last unmarked. The shared helper now footers all
+  of them and adds a page counter, since a reader of a 40-page report needs to know
+  whether any are missing. `reports.index.tsx` had its own copy of the footer inlined
+  and now uses the shared one.
+
+- 2db04ab: Fix the "Ubah harga jual di HPP" link landing on step 1 with the stepper dead.
+
+  The link from a recipe-linked inventory item passed `?edit=<id>`, but the route
+  reads `editProductId`. The page therefore never entered edit mode: it opened as
+  a blank "new calculation" on step 1, and the stepper numbers were disabled —
+  they are deliberately only clickable while editing, so both symptoms came from
+  the same wrong parameter name.
+
+  The link now passes `editProductId`, and the route accepts a `step` search
+  param so the deep link opens on step 3, where the selling price actually lives.
+  `step` is honoured only in edit mode and only for a real step number, for the
+  same reason the stepper is edit-only: a new product has nothing filled in yet,
+  so opening on step 3 would show empty fields and let the per-step validation be
+  skipped.
+
+  The wrong name survived review because the link carried an `as never` cast on
+  its search object, which silenced exactly the error that would have caught it.
+  The cast is gone; the route's search type now checks these call sites.
+
+- d0ad7e2: Stop copying a recipe's FULL BATCH cost into per-unit fields, which made
+  profitable products display as losses.
+
+  `products.hpp` is the cost of one batch (`production_qty` units), but the paths
+  that link an HPP product to inventory copied it straight into
+  `inventory_items.cost_price` — which is per base unit — and into the POS cost
+  snapshot. On the HaRa Cookies tenant, "Cookies Alpukat" costs Rp 25.308,57 per
+  40-piece batch, i.e. Rp 632,71 a piece against a Rp 4.000 price. The HPP screen
+  showed that correctly at an 84,2% margin while the inventory item read "Modal
+  Rp 25.308,57 / Pieces" with a red "Rugi" badge, and every POS sale recorded a
+  40x cost against its revenue.
+
+  Fixed at every site that turns a linked product into a per-unit cost: the "Jual
+  di POS" bulk create, the POS `hppAtSale` snapshot, and the two queries feeding
+  the item form. Those queries now ship a precomputed `hppPerUnit` alongside the
+  raw batch `hpp`, so no caller has to remember to divide — forgetting is exactly
+  what caused this. The web and mobile import pickers show the per-unit figure
+  too, since that is what becomes the item's Modal; they previously showed the
+  batch cost, so the number changed the moment a product was imported.
+
+  Migration 0145 repairs rows already written. It is deliberately narrow: only
+  items whose stored cost still equals the product's batch HPP are touched, since
+  that equality is the signature of the bug — anyone who has since typed their own
+  cost is left alone. Single-yield recipes are excluded, having nothing to repair.
+  Applied to production, correcting 6 items from Rp 25.308,57 to Rp 632,71.
+
+- a01cd77: Make the transaction history and stock movement ledger navigable, and apply a
+  date bound that was being silently ignored.
+
+  Three defects ported from JuraganQu, where a live tenant hit them. All are
+  latent here — Vintra has no tenant with enough rows to expose them yet — but
+  each becomes visible the moment one does.
+
+  **POS transaction history** fetched a hardcoded page 1 of 100 and rendered no
+  pager. The list is newest-first, so a branch ringing a few hundred sales a day
+  would show only its most recent hours and read as "the morning is missing".
+  Quiet outlets stay under 100 and look fine, which is why it surfaces unevenly.
+  Adds page controls with a "Menampilkan X–Y dari Z transaksi" count. The server
+  already returned `total` and computed reconciliation totals over the whole
+  filtered range, so those figures were right all along — only the list was cut.
+
+  **Stock movement ledger** was worse: page 1 of 50, no pager, and no filters at
+  all. Every POS sale books a row per ingredient, so a busy outlet writes
+  thousands a day and the screen showed the last few minutes. Paging alone would
+  be dozens of pages per day, so it now opens on today and offers the two cuts an
+  owner comes here for — a date range and a single item — alongside the pager.
+
+  **`listInventoryMovements` declared a `to` bound and never applied it.** A
+  caller asking for a date range got the entire history back with nothing to say
+  the upper bound had been ignored. The bound now covers the whole named day.
+
+  Also raises the item list feeding the picker and the new filter from 200 to the
+  server's 500. JuraganQu's largest tenant has exactly 200 active items — zero
+  headroom, and one more would have made entries vanish from both silently.
+
+  Both lists reset to page 1 on any filter change, since a page number from the
+  previous filter is meaningless and an out-of-range page renders an empty table
+  that reads as "no records", and both keep their current rows on screen while
+  the next page loads so the layout does not jump.
+
+- a23cfc1: Make HPP costs reach the item list, and let the bulk screen refresh.
+
+  Two problems, one root cause: the HPP → inventory bridge was one-way and one-shot.
+
+  A recipe-backed item's cost was copied from HPP at import time and then frozen.
+  Raising the price of one ingredient moved every recipe's HPP while the item list and
+  POS catalog kept showing the old "Modal" indefinitely — the number an owner reads
+  when deciding what to charge. `recalcTenantHpp` now pushes each moved product's cost
+  into its linked items in the same transaction, the way selling prices already did
+  via `pos-price-sync.ts`. Recorded sales were never affected: the sale path reads the
+  live `products.hpp`.
+
+  The `auto_sync_hpp_cost` toggle governs this and is now offered on recipe links, not
+  just ingredient links — so a tenant who prices an item some other way has the same
+  way out they always had for ingredients. An update that omits the field no longer
+  resets it to on, which would have let a partial update silently re-enable a sync the
+  owner had switched off.
+
+  "Tambah Massal dari HPP" was import-only: once a material or product had an
+  inventory item, its row was locked forever. A tenant whose catalog was fully
+  imported opened the page to find every row greyed out and the save button dead —
+  nothing to add, and no way to pull in later HPP changes. Rows now show the drift
+  (`old → new`) and can be ticked to re-sync cost and, for products, the tier-1 POS
+  price. A row whose auto-sync toggle is off is left alone: that is a deliberate
+  opt-out, not drift.
+
+- 3bd3e43: Match the calculator when a sub-recipe has no batch yield.
+
+  The sub-recipe fix shipped earlier today priced a BOM row at 0 when the
+  sub-product's `productionQty` was missing or zero. `calculate.tsx` — the screen
+  owners actually price their menu from — divides by 1 in that case, so the row
+  costs a full batch. The server therefore disagreed with the screen, which is
+  the exact failure that fix existed to prevent.
+
+  `bomRowUnitPrice` now reproduces `calculate.tsx:266-269` verbatim. A missing
+  stored HPP still yields 0, because nothing is known about that cost yet. A test
+  runs the screen's own expression against the function over several inputs, so
+  the two can no longer drift apart silently.
+
+- b6b7e71: Count nested recipes when calculating HPP.
+
+  A recipe row is either material-sourced or sub-product-sourced (the DB CHECK
+  enforces `materialId XOR sourceProductId`), but `calculateProductHpp`
+  `INNER JOIN`ed `materials` — dropping every sub-product row before the cost was
+  summed. A product built from another product was therefore costed as if its
+  nested recipe were free, understating HPP and overstating margin. The identical
+  bug was found and fixed in `getProductForEdit` some time ago; this call site was
+  missed, which is why the calculator screen and the stored `products.hpp` could
+  disagree about the same recipe.
+
+  The BOM query now `LEFT JOIN`s both sides and prices a sub-product row at
+  `sourceHpp / sourceProductionQty` — the convention `getProductForEdit` and the
+  calculator already use, so the server and the screen agree. The cost breakdown
+  reports sub-product rows under their own name instead of leaving a hole.
+
+  Pricing moved to `bomRowUnitPrice` in `lib/hpp-calculator.ts` and is covered by
+  tests, including a regression case where a Rp 2.100 nested recipe was costed at
+  zero and reported a 90% margin instead of 48%.
+
+  No production data was affected: Vintra currently has no sub-recipe rows, so the
+  fix is preventive rather than corrective.
+
+- 884307e: Restart PM2 through the ecosystem file, not by app name.
+
+  `pm2 restart <name>` replays the config PM2 stored in its own dump when the app was
+  first started and ignores `ecosystem.config.cjs` entirely. A change to
+  `interpreter_args`, `max_memory_restart` or `env` therefore rsynced to the server,
+  showed up in git, and silently never took effect — including on the rollback path.
+
+  Passing the file — by absolute path through the release symlink, so it re-resolves
+  after a rollback moves it — makes the deployed config the live one. The rollback path
+  re-enters the symlink first: `cd` had already resolved it to an inode, so without
+  that the shell is still sitting inside the release being backed out of.
+
+- e6a3315: Scope the POS price-changed guard to the tier the client actually quoted, and
+  recompute HPP once per tenant instead of once per product.
+
+  Two defects found reviewing the same day's work:
+
+  **The price guard would have blocked every mobile bulk sale.** It compared the
+  client's `unitPrice` against the tier the server resolved. The mobile cart
+  stores no tiers, so a line's price stays frozen at the tier that applied when
+  it was created — raise the quantity past a bulk threshold and the client still
+  quotes retail while the server resolves bulk. That is not a price change, but
+  the guard refused it, and mobile has no way to re-price. The guard now applies
+  only when the client names the tier it quoted (`quotedTierMinQty`) AND the
+  server resolved that same tier, which is the only case that unambiguously
+  means the price list was edited. A client that sends no tier marker behaves
+  exactly as before the guard existed. The rule moved to `isPriceChanged` in
+  `server/lib/pos-price-guard.ts` and is covered by tests, including the mobile
+  shape.
+
+  **`recalculateAllHpp` became quadratic.** It loops over products calling
+  `calculateProductHpp`, which was fine when that ran one BOM query but now
+  builds the whole tenant graph — so the loop rebuilt it per product: three
+  round trips and a full traversal each, roughly 372 queries at 124 products,
+  into server-function timeout territory. It now computes the graph once and
+  writes every product from that single pass, and reports products left
+  untouched because they sit in a recipe cycle.
+
+- 254aa1f: Number receipts `VTR-`, not `JQU-`.
+
+  The sale-number generator carried the prefix of JuraganQu, the codebase Vintra
+  was forked from, so every Vintra merchant handed their customers a receipt
+  branded with another product's name. Pulled out into a named constant with the
+  history written down, so the next reader knows it is a brand and not an opaque
+  three-letter code.
+
+  Renumbers nothing: `pos_sale_counters` keeps the sequence, so receipts already
+  issued keep their old prefix and only new sales carry `VTR`.
+
+- 755e7d3: Add a clear button to the cashier's product search.
+
+  Ringing up two items means clearing a whole product name between them. On the
+  phone the cashier actually uses, "bakwan jagung" is a dozen backspaces on a
+  popup keyboard before the next item can be typed.
+
+  The button appears only while there is text, and returns focus to the field
+  after clearing — without that the keyboard dismisses and the cashier has to tap
+  the field again, which is most of the taps the button was meant to save.
+
+- 5ebfbfb: Show an error message instead of a white screen when a page fails to render.
+
+  TanStack wraps a route in a catch boundary only when an error component is
+  configured — `Match.js` resolves the boundary to a plain fragment otherwise —
+  and the router defined none. Any render error therefore escaped to the React
+  root and unmounted the whole app. What reached the console was React's own
+  teardown failure, `Failed to execute 'removeChild' on 'Node'`, which describes
+  the collapse rather than its cause, so the original error was never visible.
+
+  `defaultErrorComponent` now installs the boundary and `defaultOnCatch` logs the
+  real error. A failing page keeps the rest of the app mounted, states what went
+  wrong, and offers retry / reload / back-to-dashboard, with the stack behind a
+  disclosure — enough for a merchant's screenshot to be actionable.
+
+  A test asserts the wiring, because the failure mode was that nobody had
+  configured it and nothing failed loudly enough to notice.
+
+- 57502f8: Resolve the session to the same tenant in the UI and on the server.
+
+  `requireAuth` ordered its membership lookup by `createdAt`; `getCurrentUser` ran its
+  own `.limit(1)` with no `ORDER BY` at all. For anyone holding two memberships
+  Postgres was free to hand the two queries different rows — the page rendered as one
+  tenant while every server function authorised against another.
+
+  Both now share one exported ordering helper, `primaryMembershipOrder`, so a future
+  change cannot move one without the other. The ordering itself also changed from
+  plain oldest-first to **owned tenant first, oldest membership as the tie-break**.
+  The two differ exactly where it hurts: someone invited to an employer's shop before
+  opening their own would otherwise be pinned to the employer's tenant forever. Users
+  with a single membership resolve to precisely the row they did before.
+
+- d6e7186: Warn before someone quietly ends up in two tenants.
+
+  Signing up with Google on an account that already belonged to a business never
+  created a second tenant — `UNIQUE(tenants.owner_id)` makes that impossible — but it
+  said nothing either. The person who pressed "Daftar" landed inside their employer's
+  shop with no explanation. `ensureTenantForOAuth` now returns which tenant and role
+  they already hold, and the callback shows that instead of a silent redirect to
+  /dashboard.
+
+  Only on the register path. `login.tsx` and `register.tsx` pass an identical
+  `redirectTo`, so the two are indistinguishable once Google redirects back; without a
+  marker the notice would greet every staff member on every login. A short-lived
+  `vtr_signup` cookie, set only by the register button, carries the intent across the
+  round-trip.
+
+  Inviting someone who already works at another tenant now needs an explicit yes.
+  `checkInviteEmailMemberships` gives the invite sheet the tenant names for its dialog,
+  and `inviteTenantMember` rejects an unconfirmed invite server-side rather than
+  trusting the UI. The invited person also gets a `member_added_to_tenant` notification
+  — web has no tenant switcher yet, so a second membership is otherwise invisible to
+  the one who gained it, and tenant resolution puts an owned tenant ahead of it.
+
+  Guard applies to the email path only. Phone-only invites derive a synthetic
+  `wa-{slug}-{phone}` address and `tenants.slug` is unique, so that user can never
+  belong to another tenant.
+
+  The mobile invite path is unchanged and will reject these invites until it sends the
+  new `confirmExistingMemberships` flag.
+
+- bceed67: Run `bun test` for `apps/web` in CI, and add the `test` script that makes it
+  runnable (`bun run test` from the repo root).
+
+  One test file already existed but nothing ever executed it. The Web typecheck
+  workflow now runs the suite after typechecking, with `if: always()` so a type
+  error cannot hide a failing test.
+
+- 01694ce: Stop a zero-cost stock movement from wiping an ingredient's price.
+
+  `unitCost` is optional on a movement and validated as `min(0)`, so a stock
+  opname submitted with the cost field left at its default arrived as 0 —
+  indistinguishable from "this really was free". The HPP uplink took it as a real
+  price, overwrote the material's `pricePerUnit` with zero, and from there that
+  ingredient's cost silently vanished from every recipe using it. The item's own
+  `costPrice` was overwritten the same way, taking the margin figures with it.
+
+  A movement now only re-costs the ingredient and the item's cost basis when it
+  states a cost above zero. Keeping the previous cost when none is given is the
+  recoverable direction to be wrong in. The movement ledger still records exactly
+  what was entered, zero included.
+
+  Ported from JuraganQu, where this fired twice in production — "Susu Putih"
+  (Rp 9/ml) and "Sirup Jambu", the latter repaired by hand two days later. Vintra
+  runs the same code, so it had the same exposure.
+
+- Updated dependencies [1b74cc5]
+- Updated dependencies [d0ad7e2]
+- Updated dependencies [1267b94]
+- Updated dependencies [a23cfc1]
+- Updated dependencies [c4b0497]
+- Updated dependencies [6b9f11b]
+- Updated dependencies [7e01ea5]
+- Updated dependencies [f40dd86]
+- Updated dependencies [d6e7186]
+  - @vintra/db@0.4.0
+  - @vintra/shared@0.4.0
+
 ## 0.3.0
 
 ### Patch Changes
