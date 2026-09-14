@@ -5,17 +5,29 @@ import {
   useRouter,
   useNavigate,
 } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Send, PackageCheck, XCircle } from 'lucide-react'
+import {
+  ArrowLeft,
+  Send,
+  PackageCheck,
+  XCircle,
+  Wallet,
+  Trash2,
+} from 'lucide-react'
 import {
   getPurchaseOrder,
   sendPurchaseOrder,
   cancelPurchaseOrder,
+  deletePoPayment,
 } from '@/server/functions/inventory-po'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast } from '@/components/ui/toast'
 import { ReceivePoSheet } from '@/components/inventory/receive-po-sheet'
+import { PoPaymentSheet } from '@/components/inventory/po-payment-sheet'
+import { PoPaymentBadge } from '@/components/inventory/po-payment-badge'
+import { poRemainingAmount } from '@/lib/po-payment'
 import { ModuleBreadcrumb } from '@/components/layout/module-breadcrumb'
 import { formatRupiah } from '@/lib/currency'
 import { cn, formatDate, formatNumberID } from '@/lib/utils' // JUR-137
@@ -35,7 +47,18 @@ function PoDetailPage() {
   const [sendOpen, setSendOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [receiveOpen, setReceiveOpen] = useState(false)
+  const [paymentOpen, setPaymentOpen] = useState(false)
+  const [deletePayment, setDeletePayment] = useState<{
+    id: string
+    amount: number
+  } | null>(null)
   const [busy, setBusy] = useState(false)
+  const queryClient = useQueryClient()
+
+  // Payment is tracked apart from receiving: any open PO can take a
+  // payment (DP before sending is common) until nothing is left to pay.
+  const remaining = poRemainingAmount(po)
+  const canPay = po.status !== 'cancelled' && remaining > 0
 
   // Status drives every action button. Doing the gating here so the
   // JSX stays clean and we never fire a server fn that the backend
@@ -58,6 +81,35 @@ function PoDetailPage() {
       })
       setSendOpen(false)
       await router.invalidate()
+    } catch (err) {
+      toast({
+        title: t('common.toastFailedTitle'),
+        description: err instanceof Error ? err.message : 'Gagal',
+        variant: 'error',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // The list page caches PO rows (payment badge included) in react-query.
+  async function refreshAfterPayment() {
+    await router.invalidate()
+    queryClient.invalidateQueries({ queryKey: ['inventory', 'po'] })
+  }
+
+  async function handleDeletePayment() {
+    if (!deletePayment) return
+    setBusy(true)
+    try {
+      await deletePoPayment({ data: { id: deletePayment.id } })
+      toast({
+        title: t('common.toastSavedTitle'),
+        description: t('inventory.poPaymentDeletedToast'),
+        variant: 'success',
+      })
+      setDeletePayment(null)
+      await refreshAfterPayment()
     } catch (err) {
       toast({
         title: t('common.toastFailedTitle'),
@@ -237,6 +289,87 @@ function PoDetailPage() {
         </ul>
       </div>
 
+      {/* Payments to the supplier — separate from receiving above. */}
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-5 py-3 dark:border-gray-700">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              {t('inventory.poPaymentTitle')}
+            </h2>
+            <PoPaymentBadge po={po} />
+          </div>
+          {canPay && (
+            <Button
+              variant="brand"
+              size="sm"
+              onClick={() => setPaymentOpen(true)}
+            >
+              <Wallet className="mr-1 h-4 w-4" />
+              {t('inventory.poPaymentRecord')}
+            </Button>
+          )}
+        </div>
+        <dl className="grid gap-2 border-b border-gray-100 px-5 py-4 sm:grid-cols-3 sm:gap-3 dark:border-gray-700">
+          <PaymentFigure
+            label={t('inventory.poPaymentTotal')}
+            value={formatRupiah(po.subtotal)}
+          />
+          <PaymentFigure
+            label={t('inventory.poPaymentPaid')}
+            value={formatRupiah(po.paidAmount)}
+          />
+          <PaymentFigure
+            label={t('inventory.poPaymentRemaining')}
+            value={formatRupiah(remaining)}
+            highlight={canPay}
+          />
+        </dl>
+        {po.payments.length === 0 ? (
+          <p className="px-5 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+            {t('inventory.poPaymentEmpty')}
+          </p>
+        ) : (
+          <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+            {po.payments.map((payment) => (
+              <li
+                key={payment.id}
+                className="flex items-start justify-between gap-3 px-5 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {formatDate(payment.paidAt, 'dd MMM yyyy')} ·{' '}
+                    {t(`inventory.poPaymentMethod_${payment.method}`)}
+                  </p>
+                  {payment.note && (
+                    <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {payment.note}
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {formatRupiah(payment.amount)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDeletePayment({
+                        id: payment.id,
+                        amount: payment.amount,
+                      })
+                    }
+                    aria-label={t('inventory.poPaymentDelete')}
+                    className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-danger-50 hover:text-danger-600 dark:hover:bg-danger-900/20 dark:hover:text-danger-400"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       {po.notes && (
         <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800">
           <p className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -269,6 +402,35 @@ function PoDetailPage() {
         cancelText={t('common.cancel')}
         variant="danger"
         loading={busy}
+      />
+
+      <ConfirmDialog
+        open={deletePayment !== null}
+        onCancel={() => setDeletePayment(null)}
+        onConfirm={handleDeletePayment}
+        title={t('inventory.poPaymentConfirmDeleteTitle')}
+        description={t('inventory.poPaymentConfirmDeleteDesc', {
+          amount: formatRupiah(deletePayment?.amount ?? 0),
+        })}
+        confirmText={t('inventory.poPaymentDelete')}
+        cancelText={t('common.cancel')}
+        variant="danger"
+        loading={busy}
+      />
+
+      <PoPaymentSheet
+        open={paymentOpen}
+        po={po}
+        onClose={() => setPaymentOpen(false)}
+        onRecorded={async () => {
+          setPaymentOpen(false)
+          toast({
+            title: t('common.toastSavedTitle'),
+            description: t('inventory.poPaymentRecordedToast'),
+            variant: 'success',
+          })
+          await refreshAfterPayment()
+        }}
       />
 
       <ReceivePoSheet
@@ -322,6 +484,34 @@ function MetaCard({
       >
         {value}
       </p>
+    </div>
+  )
+}
+
+function PaymentFigure({
+  label,
+  value,
+  highlight,
+}: {
+  label: string
+  value: string
+  highlight?: boolean
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 sm:block">
+      <dt className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          'text-sm font-semibold sm:mt-1 sm:text-base',
+          highlight
+            ? 'text-danger-600 dark:text-danger-400'
+            : 'text-gray-900 dark:text-gray-100',
+        )}
+      >
+        {value}
+      </dd>
     </div>
   )
 }

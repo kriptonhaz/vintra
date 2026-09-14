@@ -15,14 +15,25 @@ import {
   purchaseOrders,
   purchaseOrderItems,
   purchaseOrderCounters,
+  purchaseOrderPayments,
   branches,
   suppliers,
   masterHppUnits,
+  cashflowEntries,
 } from '@vintra/db/schema'
-import { and, eq, sql, desc, inArray, gte, lt, or, ilike } from 'drizzle-orm'
+import { and, eq, ne, sql, desc, inArray, gte, lt, or, ilike } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { inventoryTierLimits } from '@vintra/shared'
-import { requireInventoryAccess } from '../middleware/module-access'
+import {
+  requireInventoryAccess,
+  tenantHasCashflow,
+} from '../middleware/module-access'
+import {
+  getSystemCategoryId,
+  getDefaultAccountId,
+} from '../lib/cashflow-sync'
+import { formatRupiah } from '../../lib/currency'
+import { PO_PAYMENT_METHODS, poRemainingAmount } from '../../lib/po-payment'
 import {
   assertBranchAllowed,
   branchScopeWhere,
@@ -469,6 +480,13 @@ export const receivePurchaseOrder = createServerFn({ method: 'POST' })
 
 // ─── PO list + detail ────────────────────────────────────────────────
 
+/** Total paid so far on a PO — correlated so list queries stay one round-trip. */
+const poPaidAmountSql = sql<string>`(
+  SELECT coalesce(sum(${purchaseOrderPayments.amount}), 0)
+  FROM ${purchaseOrderPayments}
+  WHERE ${purchaseOrderPayments.purchaseOrderId} = ${purchaseOrders.id}
+)`
+
 const listPoInput = z.object({
   status: z
     .enum(['draft', 'sent', 'partial', 'received', 'cancelled'])
@@ -506,6 +524,7 @@ export const listPurchaseOrders = createServerFn({ method: 'POST' })
           poNumber: purchaseOrders.poNumber,
           status: purchaseOrders.status,
           subtotal: purchaseOrders.subtotal,
+          paidAmount: poPaidAmountSql,
           expectedAt: purchaseOrders.expectedAt,
           createdAt: purchaseOrders.createdAt,
           supplierName: suppliers.name,
@@ -525,7 +544,11 @@ export const listPurchaseOrders = createServerFn({ method: 'POST' })
     ])
 
     return {
-      items: rows.map((r) => ({ ...r, subtotal: Number(r.subtotal) })),
+      items: rows.map((r) => ({
+        ...r,
+        subtotal: Number(r.subtotal),
+        paidAmount: Number(r.paidAmount),
+      })),
       total: totalRow[0]?.count ?? 0,
       page: data.page,
       pageSize: data.pageSize,
@@ -595,9 +618,27 @@ export const getPurchaseOrder = createServerFn({ method: 'POST' })
       .leftJoin(orderedUnit, eq(purchaseOrderItems.unitId, orderedUnit.id))
       .where(eq(purchaseOrderItems.purchaseOrderId, data.id))
 
+    const payments = await db
+      .select({
+        id: purchaseOrderPayments.id,
+        amount: purchaseOrderPayments.amount,
+        method: purchaseOrderPayments.method,
+        paidAt: purchaseOrderPayments.paidAt,
+        note: purchaseOrderPayments.note,
+        createdAt: purchaseOrderPayments.createdAt,
+      })
+      .from(purchaseOrderPayments)
+      .where(eq(purchaseOrderPayments.purchaseOrderId, data.id))
+      .orderBy(
+        desc(purchaseOrderPayments.paidAt),
+        desc(purchaseOrderPayments.createdAt),
+      )
+
     return {
       ...po,
       subtotal: Number(po.subtotal),
+      paidAmount: payments.reduce((acc, p) => acc + Number(p.amount), 0),
+      payments: payments.map((p) => ({ ...p, amount: Number(p.amount) })),
       lines: lines.map((l) => ({
         ...l,
         orderedQty: Number(l.orderedQty),
@@ -622,6 +663,7 @@ const exportPoInput = z.object({
   status: z
     .enum(['draft', 'sent', 'partial', 'received', 'cancelled'])
     .optional(),
+  paymentStatus: z.enum(['unpaid', 'partial', 'paid']).optional(),
   branchId: z.string().uuid().optional(),
   supplierName: z.string().max(200).optional(),
   search: z.string().max(200).optional(),
@@ -682,11 +724,30 @@ export const exportPurchaseOrders = createServerFn({ method: 'POST' })
       )
     }
 
+    // Same rules as poPaymentStatus(): cancelled POs carry no payment
+    // status, and a zero-value PO counts as paid.
+    if (data.paymentStatus) {
+      conds.push(ne(purchaseOrders.status, 'cancelled'))
+      if (data.paymentStatus === 'unpaid') {
+        conds.push(
+          sql`${poPaidAmountSql} = 0 AND ${purchaseOrders.subtotal} > 0`,
+        )
+      } else if (data.paymentStatus === 'partial') {
+        conds.push(
+          sql`${poPaidAmountSql} > 0 AND ${poPaidAmountSql} < ${purchaseOrders.subtotal}`,
+        )
+      } else {
+        conds.push(sql`${poPaidAmountSql} >= ${purchaseOrders.subtotal}`)
+      }
+    }
+
     const orderRows = await db
       .select({
         id: purchaseOrders.id,
         poNumber: purchaseOrders.poNumber,
         status: purchaseOrders.status,
+        subtotal: purchaseOrders.subtotal,
+        paidAmount: poPaidAmountSql,
         expectedAt: purchaseOrders.expectedAt,
         createdAt: purchaseOrders.createdAt,
         supplierName: suppliers.name,
@@ -736,7 +797,11 @@ export const exportPurchaseOrders = createServerFn({ method: 'POST' })
       : []
 
     return {
-      orders,
+      orders: orders.map((o) => ({
+        ...o,
+        subtotal: Number(o.subtotal),
+        paidAmount: Number(o.paidAmount),
+      })),
       lines: lineRows.map((l) => ({
         purchaseOrderId: l.purchaseOrderId,
         itemName: l.itemName,
@@ -754,6 +819,175 @@ export const exportPurchaseOrders = createServerFn({ method: 'POST' })
       truncated,
       limit: PO_EXPORT_LIMIT,
     }
+  })
+
+// ─── PO payments ─────────────────────────────────────────────────────
+
+/** System cashflow category PO payments post to (seeded in 0130). */
+const PO_PAYMENT_CATEGORY = 'Pembelian dari Supplier'
+
+const recordPoPaymentInput = z.object({
+  purchaseOrderId: z.string().uuid(),
+  amount: z.coerce.number().positive(),
+  method: z.enum(PO_PAYMENT_METHODS),
+  paidAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  note: z.string().trim().max(500).optional().nullable(),
+})
+
+/**
+ * Record money paid to the supplier against a PO. Refuses a cancelled
+ * PO and anything above what is still outstanding.
+ *
+ * When the tenant's plan includes Cashflow, the payment is mirrored as a
+ * `po_payment` expense so the cash balance drops without a second manual
+ * entry. The Cashflow ledger refuses to edit non-manual rows, so that
+ * entry is only ever removed through `deletePoPayment`.
+ */
+export const recordPoPayment = createServerFn({ method: 'POST' })
+  .inputValidator(recordPoPaymentInput)
+  .handler(async ({ data }) => {
+    const auth = await requireInventoryAccess()
+    assertPoFeatureAvailable(auth.inventoryTier)
+
+    const [po] = await db
+      .select({
+        id: purchaseOrders.id,
+        poNumber: purchaseOrders.poNumber,
+        status: purchaseOrders.status,
+        subtotal: purchaseOrders.subtotal,
+        branchId: purchaseOrders.branchId,
+        supplierName: suppliers.name,
+      })
+      .from(purchaseOrders)
+      .innerJoin(suppliers, eq(purchaseOrders.supplierId, suppliers.id))
+      .where(
+        and(
+          eq(purchaseOrders.id, data.purchaseOrderId),
+          eq(purchaseOrders.tenantId, auth.tenantId),
+          // JUR-135: 404-via-scope.
+          branchScopeWhere(auth, purchaseOrders.branchId),
+        ),
+      )
+      .limit(1)
+    if (!po) throw new Error('PO tidak ditemukan')
+    if (po.status === 'cancelled') {
+      throw new Error('PO yang sudah dibatalkan tidak bisa dibayar.')
+    }
+
+    // Resolve the ledger target before taking the PO lock — these lookups
+    // are cached and may seed the tenant's default account.
+    let ledger: { accountId: string; categoryId: string } | null = null
+    if (await tenantHasCashflow(auth.tenantId)) {
+      const categoryId =
+        (await getSystemCategoryId(PO_PAYMENT_CATEGORY, 'expense')) ??
+        (await getSystemCategoryId('Lain-lain', 'expense'))
+      if (categoryId) {
+        // Default account for every method, like every other cashflow
+        // writer here — Vintra has no per-branch cash pots.
+        const accountId = await getDefaultAccountId(auth.tenantId)
+        ledger = { accountId, categoryId }
+      }
+    }
+
+    return await db.transaction(async (tx) => {
+      // Lock the PO row so two payments submitted together can't both
+      // pass the outstanding check and overpay.
+      await tx
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, po.id))
+        .for('update')
+      const [paidRow] = await tx
+        .select({
+          paid: sql<string>`coalesce(sum(${purchaseOrderPayments.amount}), 0)`,
+        })
+        .from(purchaseOrderPayments)
+        .where(eq(purchaseOrderPayments.purchaseOrderId, po.id))
+      const remaining = poRemainingAmount({
+        subtotal: Number(po.subtotal),
+        paidAmount: Number(paidRow?.paid ?? 0),
+      })
+      if (data.amount > remaining + 0.005) {
+        throw new Error(
+          remaining > 0
+            ? `Jumlah melebihi sisa tagihan (${formatRupiah(remaining)}).`
+            : 'PO ini sudah lunas.',
+        )
+      }
+
+      const [payment] = await tx
+        .insert(purchaseOrderPayments)
+        .values({
+          tenantId: auth.tenantId,
+          purchaseOrderId: po.id,
+          amount: data.amount.toString(),
+          method: data.method,
+          paidAt: data.paidAt,
+          note: data.note || null,
+          recordedByUserId: auth.userId,
+        })
+        .returning()
+
+      if (ledger) {
+        await tx.insert(cashflowEntries).values({
+          tenantId: auth.tenantId,
+          branchId: po.branchId,
+          accountId: ledger.accountId,
+          type: 'expense',
+          categoryId: ledger.categoryId,
+          amount: data.amount.toString(),
+          date: data.paidAt,
+          source: 'po_payment',
+          sourceRef: payment!.id,
+          note: `Pembayaran ${po.poNumber} · ${po.supplierName}`,
+          createdByUserId: auth.userId,
+        })
+      }
+
+      return payment
+    })
+  })
+
+/** Remove a mistaken payment together with its mirrored cashflow entry. */
+export const deletePoPayment = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ id: z.string().uuid() }))
+  .handler(async ({ data }) => {
+    const auth = await requireInventoryAccess()
+    assertPoFeatureAvailable(auth.inventoryTier)
+
+    const [row] = await db
+      .select({ id: purchaseOrderPayments.id })
+      .from(purchaseOrderPayments)
+      .innerJoin(
+        purchaseOrders,
+        eq(purchaseOrderPayments.purchaseOrderId, purchaseOrders.id),
+      )
+      .where(
+        and(
+          eq(purchaseOrderPayments.id, data.id),
+          eq(purchaseOrderPayments.tenantId, auth.tenantId),
+          // JUR-135: 404-via-scope.
+          branchScopeWhere(auth, purchaseOrders.branchId),
+        ),
+      )
+      .limit(1)
+    if (!row) throw new Error('Pembayaran tidak ditemukan.')
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(cashflowEntries)
+        .where(
+          and(
+            eq(cashflowEntries.tenantId, auth.tenantId),
+            eq(cashflowEntries.source, 'po_payment'),
+            eq(cashflowEntries.sourceRef, data.id),
+          ),
+        )
+      await tx
+        .delete(purchaseOrderPayments)
+        .where(eq(purchaseOrderPayments.id, data.id))
+    })
+    return { ok: true }
   })
 
 // ─── PO form data ────────────────────────────────────────────────────

@@ -65,6 +65,7 @@ const SOURCE_LABEL: Record<string, string> = {
   pos_sale: 'POS',
   bank_import: 'Bank',
   pos_cash_payout: 'Tarik Tunai',
+  po_payment: 'Pembayaran PO',
 }
 
 type EntriesResult = Awaited<ReturnType<typeof listCashflowEntries>>

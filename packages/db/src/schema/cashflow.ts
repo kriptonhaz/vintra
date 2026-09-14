@@ -132,7 +132,7 @@ export const cashflowEntries = pgTable(
     ),
     sourceChk: check(
       'cashflow_entries_source_chk',
-      sql`${t.source} IN ('manual', 'pos_sale', 'bank_import', 'ar_payment', 'ap_payment', 'stock_requisition', 'pos_cash_payout')`,
+      sql`${t.source} IN ('manual', 'pos_sale', 'bank_import', 'ar_payment', 'ap_payment', 'stock_requisition', 'pos_cash_payout', 'po_payment')`,
     ),
     tenantDateIdx: index('cashflow_entries_tenant_date_idx').on(
       t.tenantId,

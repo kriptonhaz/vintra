@@ -606,6 +606,45 @@ export const purchaseOrderItems = pgTable('purchase_order_items', {
 })
 
 /**
+ * Money paid to the supplier against a PO. Payment state (unpaid /
+ * partial / paid) is derived from sum(amount) vs the PO subtotal and
+ * never stored, so deleting a payment can't leave a stale status. It is
+ * tracked apart from receiving — a PO can be fully received but half paid.
+ */
+export const purchaseOrderPayments = pgTable(
+  'purchase_order_payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    purchaseOrderId: uuid('purchase_order_id')
+      .references(() => purchaseOrders.id, { onDelete: 'cascade' })
+      .notNull(),
+    amount: numeric('amount', { precision: 15, scale: 2 }).notNull(),
+    /** 'cash' | 'transfer' | 'qris' | 'other' — same set as ar/ap payments. */
+    method: text('method').notNull(),
+    /** Business date the money went out (not the row's created_at). */
+    paidAt: date('paid_at').notNull(),
+    note: text('note'),
+    recordedByUserId: uuid('recorded_by_user_id').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    methodChk: check(
+      'purchase_order_payments_method_chk',
+      sql`${t.method} IN ('cash', 'transfer', 'qris', 'other')`,
+    ),
+    amountChk: check(
+      'purchase_order_payments_amount_chk',
+      sql`${t.amount} > 0`,
+    ),
+    poIdx: index('purchase_order_payments_po_idx').on(t.purchaseOrderId),
+  }),
+)
+
+/**
  * Atomic per-tenant PO counter — same pattern as the financial
  * invoice counter. Stored separately from purchaseOrders so the
  * `nextPoNumber` helper can do a single upsert + return without

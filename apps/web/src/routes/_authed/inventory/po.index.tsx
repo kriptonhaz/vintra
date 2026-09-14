@@ -19,6 +19,12 @@ import { useBranch } from '@/hooks/use-branch'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
 import { downloadXlsx } from '@/components/pos/reports/export-helpers'
+import { PoPaymentBadge } from '@/components/inventory/po-payment-badge'
+import {
+  poPaymentStatus,
+  poRemainingAmount,
+  type PoPaymentStatus,
+} from '@/lib/po-payment'
 import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { Select } from '@/components/ui/select'
@@ -66,6 +72,9 @@ function PoPage() {
   const [supplierFilter, setSupplierFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [paymentFilter, setPaymentFilter] = useState<PoPaymentStatus | 'all'>(
+    'all',
+  )
   const [exporting, setExporting] = useState(false)
   const { toast } = useToast()
 
@@ -112,6 +121,8 @@ function PoPage() {
     const toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null
     return (pos?.items ?? []).filter((p) => {
       if (supplierFilter && p.supplierName !== supplierFilter) return false
+      if (paymentFilter !== 'all' && poPaymentStatus(p) !== paymentFilter)
+        return false
       if (fromTs !== null || toTs !== null) {
         const ts = new Date(p.createdAt).getTime()
         if (fromTs !== null && ts < fromTs) return false
@@ -124,7 +135,7 @@ function PoPage() {
         (p.branchName ?? '').toLowerCase().includes(q)
       )
     })
-  }, [pos?.items, searchQuery, supplierFilter, dateFrom, dateTo])
+  }, [pos?.items, searchQuery, supplierFilter, paymentFilter, dateFrom, dateTo])
 
   const filtered = useMemo(() => {
     if (statusFilter === 'all') return searchScoped
@@ -144,6 +155,7 @@ function PoPage() {
           branchId: selectedBranchId ?? undefined,
           status: statusFilter === 'all' ? undefined : statusFilter,
           supplierName: supplierFilter || undefined,
+          paymentStatus: paymentFilter === 'all' ? undefined : paymentFilter,
           search: searchQuery.trim() || undefined,
           dateFrom: dateFrom || undefined,
           dateTo: dateTo || undefined,
@@ -235,6 +247,21 @@ function PoPage() {
             />
           </div>
         )}
+        <div className="sm:w-48">
+          <Select
+            value={paymentFilter}
+            onChange={(e) =>
+              setPaymentFilter(e.target.value as PoPaymentStatus | 'all')
+            }
+            options={[
+              { value: 'all', label: t('inventory.poPaymentAllStatuses') },
+              ...(['unpaid', 'partial', 'paid'] as const).map((s) => ({
+                value: s,
+                label: t(`inventory.poPaymentStatus_${s}`),
+              })),
+            ]}
+          />
+        </div>
         <DateInput
           label={t('inventory.poDateFrom')}
           value={dateFrom}
@@ -330,14 +357,17 @@ function PoPage() {
                     <p className="font-semibold text-gray-900 dark:text-gray-100">
                       {formatRupiah(po.subtotal)}
                     </p>
-                    <span
-                      className={cn(
-                        'mt-0.5 inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
-                        statusColor(po.status),
-                      )}
-                    >
-                      {t(`inventory.poStatus_${po.status}`)}
-                    </span>
+                    <div className="mt-0.5 flex flex-wrap justify-end gap-1">
+                      <span
+                        className={cn(
+                          'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
+                          statusColor(po.status),
+                        )}
+                      >
+                        {t(`inventory.poStatus_${po.status}`)}
+                      </span>
+                      <PoPaymentBadge po={po} />
+                    </div>
                   </div>
                 </Link>
               </li>
@@ -385,9 +415,13 @@ function downloadPoWorkbook(result: PoExport, t: TFunction) {
       'No. PO',
       'Tanggal PO',
       'Status',
+      'Status Pembayaran',
       'Supplier',
       'Cabang',
       'Estimasi Tiba',
+      'Total PO (Rp)',
+      'Terbayar PO (Rp)',
+      'Sisa Tagihan PO (Rp)',
       'No.',
       'Nama Item',
       'SKU',
@@ -406,15 +440,24 @@ function downloadPoWorkbook(result: PoExport, t: TFunction) {
   ]
   for (const po of result.orders) {
     const status = t(`inventory.poStatus_${po.status}`)
+    const paymentStatus = poPaymentStatus(po)
+    const paymentLabel = paymentStatus
+      ? t(`inventory.poPaymentStatus_${paymentStatus}`)
+      : null
+    const remaining = poRemainingAmount(po)
     const lines = linesByPo.get(po.id) ?? []
     lines.forEach((line, i) => {
       detailRows.push([
         po.poNumber,
         day(po.createdAt),
         status,
+        paymentLabel,
         po.supplierName,
         po.branchName,
         day(po.expectedAt),
+        po.subtotal,
+        po.paidAmount,
+        remaining,
         i + 1,
         line.itemName,
         line.sku,

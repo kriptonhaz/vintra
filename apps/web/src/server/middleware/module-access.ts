@@ -211,6 +211,17 @@ export async function requireCashflowAccess(): Promise<POSAccessContext> {
   return auth
 }
 
+/**
+ * Non-throwing Cashflow check for ledger postings made from other
+ * modules (e.g. PO payments). Keyed on the tenant's plan only — the
+ * acting member doesn't need Cashflow access for the books to stay in
+ * sync.
+ */
+export async function tenantHasCashflow(tenantId: string): Promise<boolean> {
+  const access = await getTenantSiteAccessForTenantId(tenantId)
+  return !!access && posTierLimits(access.posTier).features.includes('cashflow')
+}
+
 export interface InventoryAccessContext extends AuthContext {
   inventoryTier: InventoryTierKey
 }
