@@ -1,5 +1,14 @@
 # @vintra/mobile
 
+## 0.1.2
+
+### Patch Changes
+
+- Updated dependencies [1b74cc5]
+- Updated dependencies [7e01ea5]
+- Updated dependencies [d6e7186]
+  - @vintra/shared@0.4.0
+
 ## 0.1.1
 
 ### Patch Changes
